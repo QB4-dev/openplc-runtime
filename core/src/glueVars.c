@@ -69,12 +69,12 @@ static IEC_ULINT *special_functions[BUFFER_SIZE];
 #undef __LOCATED_VAR
 
 void setBufferPointers(IEC_BOOL *input_bool[BUFFER_SIZE][8], IEC_BOOL *output_bool[BUFFER_SIZE][8],
-						IEC_BYTE *input_byte[BUFFER_SIZE], IEC_BYTE *output_byte[BUFFER_SIZE],
-						IEC_UINT *input_int[BUFFER_SIZE], IEC_UINT *output_int[BUFFER_SIZE],
-						IEC_UDINT *input_dint[BUFFER_SIZE], IEC_UDINT *output_dint[BUFFER_SIZE],
-						IEC_ULINT *input_lint[BUFFER_SIZE], IEC_ULINT *output_lint[BUFFER_SIZE],
-						IEC_UINT *memory_int[BUFFER_SIZE], IEC_UDINT *memory_dint[BUFFER_SIZE],
-						IEC_ULINT *memory_lint[BUFFER_SIZE])
+						IEC_BYTE *input_byte[BUFFER_SIZE][8], IEC_BYTE *output_byte[BUFFER_SIZE][8],
+						IEC_UINT *input_int[BUFFER_SIZE][8], IEC_UINT *output_int[BUFFER_SIZE][8],
+						IEC_UDINT *input_dint[BUFFER_SIZE][8], IEC_UDINT *output_dint[BUFFER_SIZE][8],
+						IEC_ULINT *input_lint[BUFFER_SIZE][8], IEC_ULINT *output_lint[BUFFER_SIZE][8],
+						IEC_UINT *memory_int[BUFFER_SIZE][8], IEC_UDINT *memory_dint[BUFFER_SIZE][8],
+						IEC_ULINT *memory_lint[BUFFER_SIZE][8])
 {
 	bool_input_ptr = input_bool;
 	bool_output_ptr = output_bool;
