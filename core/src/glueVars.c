@@ -22,6 +22,7 @@
 // Thiago Alves, May 2016
 //-----------------------------------------------------------------------------
 
+#include <stddef.h>
 #include "iec_std_lib.h"
 
 TIME __CURRENT_TIME;
@@ -93,7 +94,19 @@ void setBufferPointers(IEC_BOOL *input_bool[BUFFER_SIZE][8], IEC_BOOL *output_bo
 void glueVars()
 {
 	bool_output_ptr[0][0] = (IEC_BOOL *)__QX0_0;
+	int_output_ptr[0][0] = (IEC_UINT *)__QW0;
+	dint_output_ptr[0][0] = (IEC_UDINT *)__MD0;
+	lint_output_ptr[0][0] = (IEC_ULINT *)__ML0;
 }
+
+// void ext_setBufferPointers(IEC_BOOL *input_bool[BUFFER_SIZE][8], IEC_BOOL *output_bool[BUFFER_SIZE][8]) {
+//     for (int i = 0; i < BUFFER_SIZE; i++) {
+//         for (int j = 0; j < 8; j++) {
+//             bool_input[i][j] = input_bool[i][j];
+//             bool_output[i][j] = output_bool[i][j];
+//         }
+//     }
+// }
 
 void updateTime()
 {

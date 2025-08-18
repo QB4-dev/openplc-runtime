@@ -1,7 +1,7 @@
 # Ignore all files in the build output directory
 /build/
 /core/generated/
-
+.vscode/
 
 # Ignore all object files and shared libraries
 *.o

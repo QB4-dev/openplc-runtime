@@ -11,9 +11,8 @@
 #include <stdatomic.h>
 #include <pthread.h>
 
-atomic_long plc_heartbeat = 0;
-
-extern void* watchdog_thread(void*);
+#include "log.h"
+#include "utils.h"
 
 //#include <sched.h>
 
@@ -24,17 +23,135 @@ extern void* watchdog_thread(void*);
 //    perror("sched_setscheduler");
 //}
 
-#include "./lib/iec_types.h"
-#include "log.h"
-#include "utils.h"
-
+extern void* watchdog_thread(void*);
+atomic_long plc_heartbeat = 0;
+volatile sig_atomic_t keep_running = 1;
 time_t start_time, end_time;
 
-volatile sig_atomic_t keep_running = 1;
+//Internal buffers for I/O and memory.
+//Booleans
+IEC_BOOL *bool_input[BUFFER_SIZE][8];
+IEC_BOOL *bool_output[BUFFER_SIZE][8];
+
+//Bytes
+IEC_BYTE *byte_input[BUFFER_SIZE][8];
+IEC_BYTE *byte_output[BUFFER_SIZE][8];
+
+//Analog I/O
+IEC_UINT *int_input[BUFFER_SIZE][8];
+IEC_UINT *int_output[BUFFER_SIZE][8];
+
+//32bit I/O
+IEC_UDINT *dint_input[BUFFER_SIZE][8];
+IEC_UDINT *dint_output[BUFFER_SIZE][8];
+
+//64bit I/O
+IEC_ULINT *lint_input[BUFFER_SIZE][8];
+IEC_ULINT *lint_output[BUFFER_SIZE][8];
+
+//Memory
+IEC_UINT *int_memory[BUFFER_SIZE][8];
+IEC_UDINT *dint_memory[BUFFER_SIZE][8];
+IEC_ULINT *lint_memory[BUFFER_SIZE][8];
+
+void (*ext_config_run__)(unsigned long tick);
+void (*ext_config_init__)(void);
+void (*ext_glueVars)(void);
+void (*ext_updateTime)(void);
+void (*ext_setBufferPointers)(IEC_BOOL *input_bool[BUFFER_SIZE][8], IEC_BOOL *output_bool[BUFFER_SIZE][8],
+                              IEC_BYTE *input_byte[BUFFER_SIZE][8], IEC_BYTE *output_byte[BUFFER_SIZE][8],
+                              IEC_UINT *input_int[BUFFER_SIZE][8], IEC_UINT *output_int[BUFFER_SIZE][8],
+                              IEC_UDINT *input_dint[BUFFER_SIZE][8], IEC_UDINT *output_dint[BUFFER_SIZE][8],
+                              IEC_ULINT *input_lint[BUFFER_SIZE][8], IEC_ULINT *output_lint[BUFFER_SIZE][8],
+                              IEC_UINT *int_memory[BUFFER_SIZE][8], IEC_UDINT *dint_memory[BUFFER_SIZE][8], IEC_ULINT *lint_memory[BUFFER_SIZE][8]);
 
 void handle_sigint(int sig) {
     (void) sig;
     keep_running = 0;
+}
+
+void symbols_init(void){
+        char *error = dlerror();
+    #ifdef __APPLE__
+        void *handle = dlopen("./libplc.dylib", RTLD_LAZY);
+    #else
+        void *handle = dlopen("./libplc.so", RTLD_LAZY);
+    #endif
+    if (!handle)
+    {
+        log_error("dlopen failed: %s\n", dlerror());
+        exit(1);
+    }
+
+    // Clear any existing error
+    dlerror();
+
+    // Get pointer to external functions
+    *(void **)(&ext_config_run__) = dlsym(handle, "config_run__");
+    error = dlerror();
+    if (error)
+    {
+        log_error("dlsym function error: %s\n", error);
+        dlclose(handle);
+        exit(1);
+    }
+
+    *(void **)(&ext_config_init__) = dlsym(handle, "config_init__");
+    error = dlerror();
+    if (error)
+    {
+        log_error("dlsym function error: %s\n", error);
+        dlclose(handle);
+        exit(1);
+    }
+
+    *(void **)(&ext_glueVars) = dlsym(handle, "glueVars");
+    error = dlerror();
+    if (error)
+    {
+        log_error("dlsym function error: %s\n", error);
+        dlclose(handle);
+        exit(1);
+    }
+
+    *(void **)(&ext_updateTime) = dlsym(handle, "updateTime");
+    error = dlerror();
+    if (error)
+    {
+        log_error("dlsym function error: %s\n", error);
+        dlclose(handle);
+        exit(1);
+    }
+
+    *(void **)(&ext_setBufferPointers) = dlsym(handle, "setBufferPointers");
+    error = dlerror();
+    if (error)
+    {
+        log_error("dlsym function error: %s\n", error);
+        dlclose(handle);
+        exit(1);
+    }
+
+    *(void **)(&ext_common_ticktime__) = dlsym(handle, "common_ticktime__");
+    error = dlerror();
+    if (error)
+    {
+        log_error("dlsym function error: %s\n", error);
+        dlclose(handle);
+        exit(1);
+    }
+
+    // Get pointer to variables in .so
+    /*
+    ext_bool_output = (IEC_BOOL *(*)[8])dlsym(handle, "bool_output");
+    error = dlerror();
+    if (error)
+    {
+        fprintf(stderr, "dlsym buffer error: %s\n", error);
+        dlclose(handle);
+        exit(1);
+    }
+    */
 }
 
 int main(int argc, char* argv[])
@@ -67,6 +184,14 @@ int main(int argc, char* argv[])
     // initializing dlsym and getting pointers to external functions
     log_info("Initializing symbols");
     symbols_init();
+
+    // Send buffer pointers to .so
+    ext_setBufferPointers(bool_input, bool_output,
+                          byte_input, byte_output,
+                          int_input, int_output,
+                          dint_input, dint_output,
+                          lint_input, lint_output,
+                          int_memory, dint_memory, lint_memory);
     
     tzset();
     time(&start_time);
@@ -99,10 +224,16 @@ int main(int argc, char* argv[])
         if (bool_output[0][0])
         {
             log_debug("bool_output[0][0]: %d", *bool_output[0][0]);
+            log_debug("int_output[0][0]: %d", *int_output[0][0]);
+            log_debug("dint_output[0][0]: %d", *dint_output[0][0]);
+            log_debug("lint_output[0][0]: %d", *lint_output[0][0]);
         }
         else
         {
             log_debug("bool_output[0][0] is NULL");
+            log_debug("int_output[0][0] is NULL");
+            log_debug("dint_output[0][0] is NULL");
+            log_debug("lint_output[0][0] is NULL");
         }
 
         // printf("%d\n", *ext_common_ticktime__);
@@ -110,6 +241,7 @@ int main(int argc, char* argv[])
         // usleep((int)*ext_common_ticktime__ % 1000);
         sleep_until(&timer_start, (unsigned long long)*ext_common_ticktime__);
 
+        // TODO move to utils.c
         // Get the sleep end point which is also the start time/point of the next cycle
         clock_gettime(CLOCK_MONOTONIC, &timer_end);
         // Compute the time latency of the next cycle(caused by sleep) and do max/min/total comparison/recording
