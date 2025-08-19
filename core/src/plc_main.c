@@ -13,6 +13,7 @@
 
 #include "log.h"
 #include "utils/utils.h"
+#include "image_tables.h"
 
 //#include <sched.h>
 
@@ -28,36 +29,6 @@ atomic_long plc_heartbeat = 0;
 volatile sig_atomic_t keep_running = 1;
 time_t start_time, end_time;
 
-//Internal buffers for I/O and memory.
-//Booleans
-IEC_BOOL *bool_input[BUFFER_SIZE][8];
-IEC_BOOL *bool_output[BUFFER_SIZE][8];
-
-//Bytes
-IEC_BYTE *byte_input[BUFFER_SIZE];
-IEC_BYTE *byte_output[BUFFER_SIZE];
-
-//Analog I/O
-IEC_UINT *int_input[BUFFER_SIZE];
-IEC_UINT *int_output[BUFFER_SIZE];
-
-//32bit I/O
-IEC_UDINT *dint_input[BUFFER_SIZE];
-IEC_UDINT *dint_output[BUFFER_SIZE];
-
-//64bit I/O
-IEC_ULINT *lint_input[BUFFER_SIZE];
-IEC_ULINT *lint_output[BUFFER_SIZE];
-
-//Memory
-IEC_UINT *int_memory[BUFFER_SIZE];
-IEC_UDINT *dint_memory[BUFFER_SIZE];
-IEC_ULINT *lint_memory[BUFFER_SIZE];
-
-void (*ext_config_run__)(unsigned long tick);
-void (*ext_config_init__)(void);
-void (*ext_glueVars)(void);
-void (*ext_updateTime)(void);
 void (*ext_setBufferPointers)(IEC_BOOL *input_bool[BUFFER_SIZE][8], IEC_BOOL *output_bool[BUFFER_SIZE][8],
                               IEC_BYTE *input_byte[BUFFER_SIZE], IEC_BYTE *output_byte[BUFFER_SIZE],
                               IEC_UINT *input_int[BUFFER_SIZE], IEC_UINT *output_int[BUFFER_SIZE],
