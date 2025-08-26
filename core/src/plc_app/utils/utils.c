@@ -15,21 +15,7 @@ void normalize_timespec(struct timespec *ts) {
 void sleep_until(struct timespec *ts, long period_ns) {
     ts->tv_nsec += period_ns;
     normalize_timespec(ts);
-    #ifdef __APPLE__
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-
-        time_t sec = ts->tv_sec - now.tv_sec;
-        long nsec = ts->tv_nsec - now.tv_nsec;
-        if (nsec < 0) {
-            nsec += 1000000000;
-            sec -= 1;
-        }
-        struct timespec delay = { .tv_sec = sec, .tv_nsec = nsec };
-        nanosleep(&delay, NULL);
-    #else
-        clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ts, NULL);
-    #endif
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ts, NULL);
 }
 
 

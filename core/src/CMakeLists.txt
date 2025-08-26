@@ -23,9 +23,9 @@ add_executable(plc_main
 )
 
 # Link against shared library
-target_link_libraries(plc_main plc dl pthread)
+target_link_libraries(plc_main dl pthread)
 
 # Ensure executable can find shared library at runtime
 set_target_properties(plc_main PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )

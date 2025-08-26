@@ -4,7 +4,7 @@
 #include "./lib/iec_types.h"
 
 #define BUFFER_SIZE        1024
-#define libplc_file "libplc.so"
+#define libplc_file "./libplc.so"
 
 
 //Internal buffers for I/O and memory.
