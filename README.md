@@ -14,3 +14,9 @@ OpenPLC Runtime v4 designed to run programs built on OpenPLC Editor v4
    cd build
    cmake ..
    make
+
+3. **Compile application generated**  
+   Run the following commands from the project root:
+
+   ```bash
+   ./scripts/compile.sh

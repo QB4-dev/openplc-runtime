@@ -62,7 +62,8 @@ int symbols_init(PluginManager *pm){
 
     *(void **)(&ext_common_ticktime__) = 
             plugin_manager_get_func(pm,  void (*)(unsigned long), "common_ticktime__");
-    
+
+    // Check if all symbols were loaded successfully
     if (!ext_config_run__ || !ext_config_init__ || !ext_glueVars || 
         !ext_updateTime || !ext_setBufferPointers || !ext_common_ticktime__)
     {

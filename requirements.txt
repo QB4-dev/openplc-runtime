@@ -1,0 +1,6 @@
+Flask
+Flask-Login
+Flask-JWT-Extended
+cryptography
+flask_sqlalchemy
+python-dotenv
