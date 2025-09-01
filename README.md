@@ -5,7 +5,7 @@ OpenPLC Runtime v4 designed to run programs built on OpenPLC Editor v4
 
 ### 1. Build Application in the OpenPLC IDE
 - First, build the application project on the **OpenPLC IDE**.  
-- In the future, a **REST API** will be available to upload the generated files directly to the target.  
+- In the future, a **REST API** will be available to upload the generated files directly to the target in `path/to/project/build/OpenPLC Runtime/src/`.
 - For now, copy the generated files manually into the `/core/generated` directory.
 
 ### 2. Generate Located Variables Header
