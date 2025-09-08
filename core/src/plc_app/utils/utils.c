@@ -7,43 +7,51 @@
 unsigned long long *ext_common_ticktime__ = NULL;
 unsigned long tick__ = 0;
 
-void normalize_timespec(struct timespec *ts) {
-  while (ts->tv_nsec >= 1e9) {
-    ts->tv_nsec -= 1e9;
-    ts->tv_sec++;
-  }
+void normalize_timespec(struct timespec *ts) 
+{
+    while (ts->tv_nsec >= 1e9) 
+    {
+        ts->tv_nsec -= 1e9;
+        ts->tv_sec++;
+    }
 }
 
-void sleep_until(struct timespec *ts, long period_ns) {
-  ts->tv_nsec += period_ns;
-  normalize_timespec(ts);
-  clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ts, NULL);
+void sleep_until(struct timespec *ts, long period_ns) 
+{
+    ts->tv_nsec += period_ns;
+    normalize_timespec(ts);
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ts, NULL);
 }
 
-void timespec_diff(struct timespec *a, struct timespec *b,
-                   struct timespec *result) {
-  // Calculate the difference in seconds
-  result->tv_sec = a->tv_sec - b->tv_sec;
+void timespec_diff(struct timespec *a, struct timespec *b, struct timespec *result) 
+{
+    // Calculate the difference in seconds
+    result->tv_sec = a->tv_sec - b->tv_sec;
 
-  // Calculate the difference in nanoseconds
-  result->tv_nsec = a->tv_nsec - b->tv_nsec;
+    // Calculate the difference in nanoseconds
+    result->tv_nsec = a->tv_nsec - b->tv_nsec;
 
-  // Handle borrowing if nanoseconds are negative
-  if (result->tv_nsec < 0) {
-    // Borrow 1 second (1e9 nanoseconds)
-    --result->tv_sec;
-    result->tv_nsec += 1000000000L;
-  }
+    // Handle borrowing if nanoseconds are negative
+    if (result->tv_nsec < 0) 
+    {
+        // Borrow 1 second (1e9 nanoseconds)
+        --result->tv_sec;
+        result->tv_nsec += 1000000000L;
+    }
 }
 
 // configure SCHED_FIFO priority
-void set_realtime_priority(void) {
-  struct sched_param param;
-  param.sched_priority = 20; // Priority between 1 and 99
+void set_realtime_priority(void) 
+{
+    struct sched_param param;
+    param.sched_priority = 20; // Priority between 1 and 99
 
-  if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
-    fprintf(stderr, "sched_setscheduler failed: %s\n", strerror(errno));
-  } else {
-    printf("Scheduler set to SCHED_FIFO, priority %d\n", param.sched_priority);
-  }
+    if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) 
+    {
+        fprintf(stderr, "sched_setscheduler failed: %s\n", strerror(errno));
+    } 
+    else 
+    {
+        printf("Scheduler set to SCHED_FIFO, priority %d\n", param.sched_priority);
+    }
 }

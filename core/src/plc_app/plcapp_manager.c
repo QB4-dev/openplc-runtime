@@ -5,51 +5,69 @@
 #include <string.h>
 
 struct PluginManager {
-  char *so_path;
-  void *handle;
+    char *so_path;
+    void *handle;
 };
 
-PluginManager *plugin_manager_create(const char *so_path) {
-  PluginManager *pm = calloc(1, sizeof(PluginManager));
-  if (!pm)
-    return NULL;
-  pm->so_path = strdup(so_path);
-  pm->handle = NULL;
-  return pm;
+PluginManager *plugin_manager_create(const char *so_path) 
+{
+    PluginManager *pm = calloc(1, sizeof(PluginManager));
+    if (!pm)
+    {
+        return NULL;
+    }
+    pm->so_path = strdup(so_path);
+    pm->handle = NULL;
+    return pm;
 }
 
-void plugin_manager_destroy(PluginManager *pm) {
-  if (!pm)
-    return;
-  if (pm->handle)
-    dlclose(pm->handle);
-  free(pm->so_path);
-  free(pm);
+void plugin_manager_destroy(PluginManager *pm) 
+{
+    if (!pm)
+    {
+        return;
+    }
+    if (pm->handle)
+    {
+        dlclose(pm->handle);
+    }
+    free(pm->so_path);
+    free(pm);
 }
 
-bool plugin_manager_load(PluginManager *pm) {
-  if (!pm)
-    return false;
-  if (pm->handle)
-    return true; // already loaded
+bool plugin_manager_load(PluginManager *pm) 
+{
+    if (!pm)
+    {
+        return false;
+    }
+    if (pm->handle)
+    {
+        return true; // already loaded
+    }
 
-  pm->handle = dlopen(pm->so_path, RTLD_NOW);
-  if (!pm->handle) {
-    fprintf(stderr, "Failed to load plugin %s: %s\n", pm->so_path, dlerror());
-    return false;
-  }
-  return true;
+    pm->handle = dlopen(pm->so_path, RTLD_NOW);
+    if (!pm->handle) 
+    {
+        fprintf(stderr, "Failed to load plugin %s: %s\n", pm->so_path, dlerror());
+        return false;
+    }
+    return true;
 }
 
-void *plugin_manager_get_symbol(PluginManager *pm, const char *symbol_name) {
-  if (!pm || !pm->handle)
-    return NULL;
-  dlerror(); // clear old error
-  void *sym = dlsym(pm->handle, symbol_name);
-  char *err = dlerror();
-  if (err) {
-    fprintf(stderr, "dlsym error: %s\n", err);
-    return NULL;
-  }
-  return sym;
+void *plugin_manager_get_symbol(PluginManager *pm, const char *symbol_name) 
+{
+    if (!pm || !pm->handle)
+    {
+        return NULL;
+    }
+    dlerror(); // clear old error
+    void *sym = dlsym(pm->handle, symbol_name);
+    char *err = dlerror();
+    if (err) 
+    {
+        fprintf(stderr, "dlsym error: %s\n", err);
+        return NULL;
+    }
+    return sym;
 }
