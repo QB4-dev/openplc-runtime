@@ -46,6 +46,10 @@ void *print_stats_thread(void *arg)
         }
 
         log_info("Scan Count: %lu", plc_timing_stats.scan_count);
+        log_info("Scan Time - Min: %ld us, Max: %ld us, Avg: %ld us",
+                 plc_timing_stats.scan_time_min,
+                 plc_timing_stats.scan_time_max,
+                 plc_timing_stats.scan_time_avg);
         log_info("Cycle Time - Min: %lu us, Max: %lu us, Avg: %ld us",
                  plc_timing_stats.cycle_time_min,
                  plc_timing_stats.cycle_time_max,
