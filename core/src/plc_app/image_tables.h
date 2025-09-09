@@ -1,7 +1,7 @@
 #ifndef IMAGE_TABLES_H
 #define IMAGE_TABLES_H
 
-#include "./lib/iec_types.h"
+#include "../lib/iec_types.h"
 #include "plcapp_manager.h"
 
 #define BUFFER_SIZE 1024
