@@ -19,9 +19,10 @@ add_executable(plc_main
     ${CMAKE_SOURCE_DIR}/core/src/plc_app/plc_main.c
     ${CMAKE_SOURCE_DIR}/core/src/plc_app/utils/log.c
     ${CMAKE_SOURCE_DIR}/core/src/plc_app/utils/utils.c
+    ${CMAKE_SOURCE_DIR}/core/src/plc_app/utils/watchdog.c
     ${CMAKE_SOURCE_DIR}/core/src/plc_app/image_tables.c
-    ${CMAKE_SOURCE_DIR}/core/src/plc_app/watchdog.c
     ${CMAKE_SOURCE_DIR}/core/src/plc_app/plcapp_manager.c
+    ${CMAKE_SOURCE_DIR}/core/src/plc_app/scan_cycle_manager.c
 )
 
 # Link against shared library

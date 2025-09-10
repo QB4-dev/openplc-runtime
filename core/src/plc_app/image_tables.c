@@ -44,38 +44,40 @@ void (*ext_setBufferPointers)(
     IEC_UINT *int_memory[BUFFER_SIZE], IEC_UDINT *dint_memory[BUFFER_SIZE],
     IEC_ULINT *lint_memory[BUFFER_SIZE]);
 
-int symbols_init(PluginManager *pm) {
-  // Get pointer to external functions
-  *(void **)(&ext_config_run__) =
-      plugin_manager_get_func(pm, void (*)(unsigned long), "config_run__");
+int symbols_init(PluginManager *pm) 
+{
+    // Get pointer to external functions
+    *(void **)(&ext_config_run__) =
+        plugin_manager_get_func(pm, void (*)(unsigned long), "config_run__");
 
-  *(void **)(&ext_config_init__) =
-      plugin_manager_get_func(pm, void (*)(unsigned long), "config_init__");
+    *(void **)(&ext_config_init__) =
+        plugin_manager_get_func(pm, void (*)(unsigned long), "config_init__");
 
-  *(void **)(&ext_glueVars) =
-      plugin_manager_get_func(pm, void (*)(unsigned long), "glueVars");
+    *(void **)(&ext_glueVars) =
+        plugin_manager_get_func(pm, void (*)(unsigned long), "glueVars");
 
-  *(void **)(&ext_updateTime) =
-      plugin_manager_get_func(pm, void (*)(unsigned long), "updateTime");
+    *(void **)(&ext_updateTime) =
+        plugin_manager_get_func(pm, void (*)(unsigned long), "updateTime");
 
-  *(void **)(&ext_setBufferPointers) =
-      plugin_manager_get_func(pm, void (*)(unsigned long), "setBufferPointers");
+    *(void **)(&ext_setBufferPointers) =
+        plugin_manager_get_func(pm, void (*)(unsigned long), "setBufferPointers");
 
-  *(void **)(&ext_common_ticktime__) =
-      plugin_manager_get_func(pm, void (*)(unsigned long), "common_ticktime__");
+    *(void **)(&ext_common_ticktime__) =
+        plugin_manager_get_func(pm, void (*)(unsigned long), "common_ticktime__");
 
-  // Check if all symbols were loaded successfully
-  if (!ext_config_run__ || !ext_config_init__ || !ext_glueVars ||
-      !ext_updateTime || !ext_setBufferPointers || !ext_common_ticktime__) {
-    log_error("Failed to load all symbols");
-    return -1;
-  }
+    // Check if all symbols were loaded successfully
+    if (!ext_config_run__ || !ext_config_init__ || !ext_glueVars ||
+        !ext_updateTime || !ext_setBufferPointers || !ext_common_ticktime__) 
+    {
+        log_error("Failed to load all symbols");
+        return -1;
+    }
 
-  // Send buffer pointers to .so
-  ext_setBufferPointers(bool_input, bool_output, byte_input, byte_output,
-                        int_input, int_output, dint_input, dint_output,
-                        lint_input, lint_output, int_memory, dint_memory,
-                        lint_memory);
+    // Send buffer pointers to .so
+    ext_setBufferPointers(bool_input, bool_output, byte_input, byte_output,
+                            int_input, int_output, dint_input, dint_output,
+                            lint_input, lint_output, int_memory, dint_memory,
+                            lint_memory);
 
-  return 0;
+    return 0;
 }
