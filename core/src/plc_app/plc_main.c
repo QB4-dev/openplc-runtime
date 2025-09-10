@@ -33,6 +33,7 @@ void *print_stats_thread(void *arg)
     (void)arg;
     while (keep_running) 
     {
+        /*
         if (bool_output[0][0]) 
         {
             log_debug("bool_output[0][0]: %d", *bool_output[0][0]);
@@ -41,6 +42,7 @@ void *print_stats_thread(void *arg)
         {
             log_debug("bool_output[0][0] is NULL");
         }
+        */
 
         log_info("Scan Count: %lu", plc_timing_stats.scan_count);
         log_info("Scan Time - Min: %ld us, Max: %ld us, Avg: %ld us",
@@ -57,8 +59,8 @@ void *print_stats_thread(void *arg)
                  plc_timing_stats.cycle_latency_avg);
         log_info("Overruns: %lu", plc_timing_stats.overruns);
 
-        // Print every 100ms
-        usleep(100000);
+        // Print every 5 seconds
+        sleep(5);
     }
     return NULL;
 }
