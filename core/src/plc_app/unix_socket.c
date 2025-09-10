@@ -9,8 +9,11 @@
 
 #include "unix_socket.h"
 #include "utils/log.h"
+#include "utils/utils.h"
+#include "plc_state_manager.h"
 
 extern volatile sig_atomic_t keep_running;
+extern PLCState plc_state;
 
 // helper: read one line terminated by '\n' from a socket
 static ssize_t read_line(int fd, char *buffer, size_t max_length)
@@ -34,10 +37,44 @@ static ssize_t read_line(int fd, char *buffer, size_t max_length)
     return total_read;
 }
 
+void handle_unix_socket_commands(char *command)
+{
+    if (strcmp(command, "STATUS") == 0) 
+    {
+        log_debug("Received STATUS command");
+        // TODO: Implement status reporting
+    } 
+    else if (strcmp(command, "STOP") == 0) 
+    {
+        log_debug("Received STOP command");
+        set_plc_state(PLC_STATE_STOPPED);
+    } 
+    else if (strcmp(command, "START") == 0) 
+    {
+        log_debug("Received START command");
+        PLCState current_state = plc_get_state();
+        if (current_state == PLC_STATE_STOPPED || current_state == PLC_STATE_ERROR) 
+        {
+            set_plc_state(PLC_STATE_RUNNING);
+        } 
+        else 
+        {
+            log_info("PLC is already running");
+        }
+    }
+    else 
+    {
+        log_error("Unknown command received: %s", command);
+    }
+}
+
 void *unix_socket_thread(void *arg) 
 {
     (void)arg;
     int *server_fd_pt = (int *)arg;
+    int client_fd;
+    char command_buffer[COMMAND_BUFFER_SIZE];
+
     if (server_fd_pt == NULL) 
     {
         log_error("Server file descriptor is NULL");
@@ -53,7 +90,44 @@ void *unix_socket_thread(void *arg)
 
     while (keep_running)
     {
-        handle_unix_socket_commands(server_fd);
+        client_fd = accept(server_fd, NULL, NULL);
+        if (client_fd < 0) 
+        {
+            if (errno == EINTR) 
+            {
+                continue; // Interrupted by signal, retry
+            }
+            log_error("Unix socket accept failed: %s", strerror(errno));
+            
+            // Retry after a short delay
+            sleep(1);
+            continue;
+        }
+
+        log_info("Unix socket client connected");
+
+        while (keep_running)
+        {
+            ssize_t bytes_read = read_line(client_fd, command_buffer, COMMAND_BUFFER_SIZE);
+            if (bytes_read > 0) 
+            {
+                log_debug("Received command: %s", command_buffer);
+
+                // Handle the command
+                handle_unix_socket_commands(command_buffer);
+            }
+            else if (bytes_read == 0)
+            {
+                log_info("Unix socket client disconnected");
+                break;
+            } 
+            else 
+            {
+                log_error("Unix socket read failed: %s", strerror(errno));
+                break;
+            }
+        }
+        close(client_fd);
     }
 
     close_unix_socket(server_fd);
