@@ -186,10 +186,13 @@ int setup_unix_socket()
     
     // Create a thread to handle socket commands
     pthread_t socket_thread;
-    if (pthread_create(&socket_thread, NULL, unix_socket_thread, &server_fd) != 0) 
+    int *fd_ptr = malloc(sizeof(int));
+    *fd_ptr = server_fd;
+    if (pthread_create(&socket_thread, NULL, unix_socket_thread, fd_ptr) != 0) 
     {
         log_error("Failed to create UNIX socket thread: %s", strerror(errno));
         close(server_fd);
+        free(fd_ptr);
         return -1;
     }
 
