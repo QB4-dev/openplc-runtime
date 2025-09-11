@@ -72,7 +72,6 @@ class CertGen:
         print(f"Certificate saved to {cert_file}")
         print(f"Private key saved to {key_file}")
 
-    # TODO add a function to update the certificate on the client before expiration
     def is_certificate_valid(self, cert_file):
         """Check if the certificate is valid."""
         if not os.path.exists(cert_file):
@@ -84,15 +83,16 @@ class CertGen:
                 cert_data = f.read()
             cert = x509.load_pem_x509_certificate(cert_data, default_backend())
 
-            now = datetime.datetime.utcnow()
+            # Create a UTC-aware datetime object
+            now = datetime.datetime.now(datetime.timezone.utc)
 
             if now < cert.not_valid_before_utc:
                 print(
-                    f"Certificate is not yet valid. Valid from: {cert.not_valid_before}"
+                    f"Certificate is not yet valid. Valid from: {cert.not_valid_before_utc}"
                 )
                 return False
             if now > cert.not_valid_after_utc:
-                print(f"Certificate has expired. Expired on: {cert.not_valid_after}")
+                print(f"Certificate has expired. Expired on: {cert.not_valid_after_utc}")
                 return False
 
             print(f"Certificate is valid. Expires on: {cert.not_valid_after_utc}")
