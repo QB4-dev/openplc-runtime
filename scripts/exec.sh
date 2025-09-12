@@ -1,0 +1,5 @@
+#!/bin/bash
+set -euo pipefail
+
+# Execute the PLC runtime and webserver
+./build/plc_main && .venv/bin/python3 webserver/app.py

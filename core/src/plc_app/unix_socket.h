@@ -1,7 +1,7 @@
 #ifndef UNIX_SOCKET_H
 #define UNIX_SOCKET_H
 
-#define SOCKET_PATH "/tmp/plc_runtime.socket"
+#define SOCKET_PATH "./plc_runtime.socket"
 #define COMMAND_BUFFER_SIZE 1024
 #define MAX_RESPONSE_SIZE 1024
 #define MAX_CLIENTS 1

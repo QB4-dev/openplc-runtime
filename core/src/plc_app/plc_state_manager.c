@@ -145,7 +145,7 @@ int plc_state_manager_init(void)
     pthread_mutex_lock(&state_mutex);
     plc_state = PLC_STATE_STOPPED;
 
-    plc_program = plugin_manager_create("./libplc.so");
+    plc_program = plugin_manager_create(libplc_file);
     if (plc_program == NULL) 
     {
         log_error("Failed to create PluginManager");
@@ -182,7 +182,7 @@ bool plc_set_state(PLCState new_state)
     {
         if (plc_program == NULL)
         {
-            plc_program = plugin_manager_create("./libplc.so");
+            plc_program = plugin_manager_create(libplc_file);
             if (plc_program == NULL) 
             {
                 log_error("Failed to create PluginManager");
