@@ -6,6 +6,7 @@ import ssl
 import threading
 from pathlib import Path
 from typing import Callable
+import time
 
 import flask
 import flask_login
@@ -187,6 +188,118 @@ def restapi_callback_post(argument: str, data: dict) -> dict:
     return handler(data)
 
 
+# def run_https():
+#     # rest api register
+#     app_restapi.register_blueprint(restapi_bp, url_prefix="/api")
+#     register_callback_get(restapi_callback_get)
+#     register_callback_post(restapi_callback_post)
+
+#     with app_restapi.app_context():
+#         try:
+#             db.create_all()
+#             db.session.commit()
+#             logger.info("Database tables created successfully.")
+#         except Exception as e:
+#             logger.error("Error creating database tables: %s", e)
+
+#     try:
+#         cert_gen = CertGen(hostname=HOSTNAME, ip_addresses=["127.0.0.1"])
+#         if not os.path.exists(CERT_FILE) or not os.path.exists(KEY_FILE):
+#             cert_gen.generate_self_signed_cert(cert_file=CERT_FILE, 
+#                                                key_file=KEY_FILE)
+#         # Verify expiration date
+#         elif cert_gen.is_certificate_valid(CERT_FILE):
+#             print(
+#                 cert_gen.generate_self_signed_cert(
+#                     cert_file=CERT_FILE, key_file=KEY_FILE
+#                 )
+#             )
+#         else:
+#             print("Credentials already generated!")
+
+#         try:
+#             context = (CERT_FILE, KEY_FILE)
+#             app_restapi.run(
+#                 debug=False,
+#                 host="0.0.0.0",
+#                 threaded=True,
+#                 port=8443,
+#                 ssl_context=context,
+#             )
+#         except KeyboardInterrupt as e:
+#             logger.info("Exiting OpenPLC Webserver...%s", e)
+#             openplc_runtime.stop_runtime()
+#         except Exception as e:
+#             logger.error("An error occurred: %s", e)
+#             openplc_runtime.stop_runtime()
+
+#     except FileNotFoundError as e:
+#         logger.error("Could not find SSL credentials! %s", e)
+#     except ssl.SSLError as e:
+#         logger.error("SSL credentials FAIL! %s", e)
+
+
+# async def async_unix_socket(command_queue: queue.Queue):
+#     """Main Unix client loop that runs in the background."""
+#     client = AsyncUnixClient(command_queue, "/tmp/plc_runtime.socket")
+
+#     # Wait until server socket exists before connecting
+#     for _ in range(50):  # ~5 seconds max
+#         if os.path.exists(client.socket_path):
+#             break
+#         logger.info("Waiting for server socket %s...", client.socket_path)
+#         await asyncio.sleep(0.1)
+#     else:
+#         logger.error("Server socket was never created!")
+#         return
+
+#     try:
+#         await client.connect()
+#     except (FileNotFoundError, ConnectionRefusedError) as e:
+#         logger.error("Failed to connect to Unix socket: %s", e)
+#         return
+
+#     logger.info("Unix client connected successfully")
+    
+#     # Kick off background processing of the command queue
+#     # asyncio.create_task(client.process_command_queue())
+
+#     # Keep the client alive
+#     try:
+#         await client.process_command_queue()
+#     except asyncio.CancelledError:
+#         await client.close()
+#         logger.info("Unix client stopped")
+
+# def start_asyncio_loop(async_loop):
+#     """Run asyncio loop in its own thread"""
+#     asyncio.set_event_loop(async_loop)
+#     async_loop.run_forever()
+
+
+# if __name__ == "__main__":
+#     threading.Thread(target=run_https, daemon=True).start()
+
+#     loop = asyncio.new_event_loop()
+#     async_thread = threading.Thread(
+#         target=start_asyncio_loop, args=(loop,), daemon=True
+#     )
+#     async_thread.start()
+
+#     future = asyncio.run_coroutine_threadsafe(
+#         async_unix_socket(command_queue), loop
+#     )
+
+#     logger.info("Main thread is running (REST API + Unix client).")
+#     try:
+#         future.result()
+#     except KeyboardInterrupt:
+#         logger.error("Stopping services...")
+#         loop.call_soon_threadsafe(loop.stop)
+#         async_thread.join()
+#     finally:
+#         logger.warning("Program finished.")
+
 def run_https():
     # rest api register
     app_restapi.register_blueprint(restapi_bp, url_prefix="/api")
@@ -202,50 +315,40 @@ def run_https():
             logger.error("Error creating database tables: %s", e)
 
     try:
-        # CertGen class is used to generate SSL certificates and verify their validity
         cert_gen = CertGen(hostname=HOSTNAME, ip_addresses=["127.0.0.1"])
-        # Generate certificate if it doesn't exist
         if not os.path.exists(CERT_FILE) or not os.path.exists(KEY_FILE):
-            cert_gen.generate_self_signed_cert(cert_file=CERT_FILE, key_file=KEY_FILE)
-        # Verify expiration date
+            cert_gen.generate_self_signed_cert(cert_file=CERT_FILE, 
+                                               key_file=KEY_FILE)
         elif cert_gen.is_certificate_valid(CERT_FILE):
-            print(
-                cert_gen.generate_self_signed_cert(
-                    cert_file=CERT_FILE, key_file=KEY_FILE
-                )
-            )
-        # Credentials already created
+            cert_gen.generate_self_signed_cert(cert_file=CERT_FILE, key_file=KEY_FILE)
         else:
             print("Credentials already generated!")
 
-        try:
-            context = (CERT_FILE, KEY_FILE)
-            app_restapi.run(
-                debug=False,
-                host="0.0.0.0",
-                threaded=True,
-                port=8443,
-                ssl_context=context,
-            )
-        except KeyboardInterrupt as e:
-            logger.info("Exiting OpenPLC Webserver...%s", e)
-            openplc_runtime.stop_runtime()
-        except Exception as e:
-            logger.error("An error occurred: %s", e)
-            openplc_runtime.stop_runtime()
+        context = (CERT_FILE, KEY_FILE)
+        app_restapi.run(
+            debug=False,
+            host="0.0.0.0",
+            threaded=True,
+            port=8443,
+            ssl_context=context,
+        )
 
     except FileNotFoundError as e:
         logger.error("Could not find SSL credentials! %s", e)
     except ssl.SSLError as e:
         logger.error("SSL credentials FAIL! %s", e)
+    except KeyboardInterrupt:
+        logger.info("HTTP server stopped by KeyboardInterrupt")
+    finally:
+        openplc_runtime.stop_runtime()
 
 
 async def async_unix_socket(command_queue: queue.Queue):
     """Main Unix client loop that runs in the background."""
     client = AsyncUnixClient(command_queue, "/tmp/plc_runtime.socket")
 
-    # Wait until server socket exists before connecting
-    for _ in range(50):  # ~5 seconds max
+    # Wait for server socket
+    for _ in range(50):
         if os.path.exists(client.socket_path):
             break
         logger.info("Waiting for server socket %s...", client.socket_path)
@@ -256,47 +359,55 @@ async def async_unix_socket(command_queue: queue.Queue):
 
     try:
         await client.connect()
+        logger.info("Unix client connected successfully")
+        await client.process_command_queue()
+            
     except (FileNotFoundError, ConnectionRefusedError) as e:
         logger.error("Failed to connect to Unix socket: %s", e)
-        return
-
-    logger.info("Unix client connected successfully")
-    
-    # Kick off background processing of the command queue
-    # asyncio.create_task(client.process_command_queue())
-
-    # Keep the client alive
-    try:
-        await client.process_command_queue()
     except asyncio.CancelledError:
-        await client.close()
-        logger.info("Unix client stopped")
+        logger.info("Unix client stopped by cancellation")
+    finally:
+        if hasattr(client, 'close'):
+            await client.close()
 
-def start_asyncio_loop(async_loop):
-    """Run asyncio loop in its own thread"""
-    asyncio.set_event_loop(async_loop)
-    async_loop.run_forever()
+
+def start_unix_socket_client(command_queue):
+    """Start the Unix socket client in its own event loop"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        loop.run_until_complete(async_unix_socket(command_queue))
+    except KeyboardInterrupt:
+        logger.info("Unix client stopped by KeyboardInterrupt")
+    finally:
+        # Cancel all tasks and close the loop
+        tasks = asyncio.all_tasks(loop)
+        for task in tasks:
+            task.cancel()
+        loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+        loop.close()
 
 
 if __name__ == "__main__":
-    threading.Thread(target=run_https, daemon=True).start()
-
-    loop = asyncio.new_event_loop()
-    async_thread = threading.Thread(
-        target=start_asyncio_loop, args=(loop,), daemon=True
-    )
-    async_thread.start()
-
-    future = asyncio.run_coroutine_threadsafe(
-        async_unix_socket(command_queue), loop
-    )
-
-    logger.info("Main thread is running (REST API + Unix client).")
+    # Create and start threads
+    https_thread = threading.Thread(target=run_https, daemon=True)
+    unix_thread = threading.Thread(target=start_unix_socket_client, args=(command_queue,), daemon=True)
+    
+    https_thread.start()
+    unix_thread.start()
+    
+    logger.info("Main thread is running (REST API + Unix client). Press Ctrl+C to exit.")
+    
     try:
-        future.result()
+        # Keep main thread alive, waiting for KeyboardInterrupt
+        while https_thread.is_alive() or unix_thread.is_alive():
+            time.sleep(0.5)
+            
     except KeyboardInterrupt:
-        logger.error("Stopping services...")
-        loop.call_soon_threadsafe(loop.stop)
-        async_thread.join()
+        logger.info("Keyboard interrupt received, shutting down...")
+        
     finally:
-        logger.warning("Program finished.")
+        # Stop the runtime
+        openplc_runtime.stop_runtime()
+        logger.info("Shutdown complete")
