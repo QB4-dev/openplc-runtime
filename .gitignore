@@ -6,13 +6,13 @@
 .*/
 venv/
 __pycache__/
-*/instance/
 
 # Temporary files
 *.txt
 *.log
 *.env
 *.pem
+*.db
 
 # Ignore all object files and shared libraries
 *.o

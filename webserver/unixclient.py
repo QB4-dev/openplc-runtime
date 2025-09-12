@@ -54,8 +54,6 @@ class AsyncUnixClient:
             raise RuntimeError("Writer not connected")
 
         data = msg.encode()
-        # prefix = struct.pack("!I", len(data))   # 4-byte big-endian length
-        # raw = prefix + data
         try:
             self.writer.write(data)
 
