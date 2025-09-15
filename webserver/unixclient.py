@@ -14,7 +14,7 @@ class AsyncUnixClient:
     def __init__(
             self, 
             command_queue: queue.Queue,
-            socket_path="/var/run/runtime/plc_runtime.socket",
+            socket_path="/run/runtime/plc_runtime.socket",
         ):
         self.socket_path = socket_path
         self.reader: Optional[asyncio.StreamReader] = None

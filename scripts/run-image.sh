@@ -6,4 +6,4 @@ docker run --rm -it \
     --ulimit rtprio=99 \
     --ulimit memlock=-1 \
     -p 8443:8443 \
-    build-env bash
+    build-env

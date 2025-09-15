@@ -1,14 +1,16 @@
 # Dockerfile
 FROM debian:bookworm-slim
 
-# COPY install.sh /install.sh
-EXPOSE 8443
+RUN apt-get update && apt-get install -y \
+    python3 python3-venv python3-pip bash \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY . /workdir
 WORKDIR /workdir
-RUN mkdir /var/run/runtime
-RUN chmod +x install.sh
-RUN chmod +x scripts/*
+COPY . .
+RUN mkdir -p /var/run/runtime
+RUN chmod +x install.sh scripts/* build/*
 RUN ./install.sh docker
 
-ENTRYPOINT [ "bash", "./scripts/exec.sh" ]
+EXPOSE 8443
+
+CMD ["bash", "-c", "./build/plc_main & .venv/bin/python3 webserver/app.py"]

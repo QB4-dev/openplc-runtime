@@ -232,7 +232,7 @@ def run_https():
 
 async def async_unix_socket(command_queue: queue.Queue):
     """Main Unix client loop that runs in the background."""
-    client = AsyncUnixClient(command_queue, "/var/run/runtime/plc_runtime.socket")
+    client = AsyncUnixClient(command_queue, "/run/runtime/plc_runtime.socket")
 
     # Wait for server socket
     for _ in range(50):
