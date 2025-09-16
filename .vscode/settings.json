@@ -1,6 +1,10 @@
 {
     "files.associations": {
-        "sched.h": "c"
+        "sched.h": "c",
+        "scan_cycle_manager.h": "c",
+        "dlfcn.h": "c",
+        "utils.h": "c",
+        "plc_state_manager.h": "c"
     },
     "editor.rulers": [
         80
