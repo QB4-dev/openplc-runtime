@@ -59,6 +59,8 @@ void handle_unix_socket_commands(const char *command, char *response, size_t res
             strncpy(response, "STATUS:STOPPED\n", response_size);
         else if (current_state == PLC_STATE_ERROR)
             strncpy(response, "STATUS:ERROR\n", response_size);
+        else if (current_state == PLC_STATE_EMPTY)
+            strncpy(response, "STATUS:EMPTY\n", response_size);
         else
             strncpy(response, "STATUS:UNKNOWN\n", response_size);
     }
@@ -74,7 +76,7 @@ void handle_unix_socket_commands(const char *command, char *response, size_t res
     {
         log_debug("Received START command");
         PLCState current_state = plc_get_state();
-        if (current_state == PLC_STATE_STOPPED || current_state == PLC_STATE_ERROR)
+        if (current_state != PLC_STATE_RUNNING)
         {
             if (plc_set_state(PLC_STATE_RUNNING))
             {
