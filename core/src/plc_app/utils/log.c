@@ -45,7 +45,7 @@ void *log_thread_management(void *arg)
             socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
             if (socket_fd < 0)
             {
-                perror("Log socket creation failed");
+                log_error("Log socket creation failed: %s", strerror(errno));
                 // Wait before retrying
                 sleep(1);
                 continue;
@@ -56,7 +56,7 @@ void *log_thread_management(void *arg)
             strncpy(addr.sun_path, unix_socket_path, sizeof(addr.sun_path) - 1);
             if (connect(socket_fd, (struct sockaddr *)&addr, sizeof(addr)) == -1)
             {
-                perror("Log socket connection failed");
+                log_error("Log socket connection failed: %s", strerror(errno));
                 close(socket_fd);
                 socket_fd = -1;
             }
