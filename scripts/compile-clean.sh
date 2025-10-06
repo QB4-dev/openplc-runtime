@@ -11,5 +11,3 @@ find . -maxdepth 1 -name "*.o" -type f -exec rm -f {} \;
 
 # Clean extra .o files from build dir if needed
 rm -f "$BUILD_DIR"/*.o
-
-echo "[INFO] Cleanup finished. libplc.so is in $BUILD_DIR/"
