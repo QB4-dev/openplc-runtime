@@ -5,6 +5,7 @@ import threading
 from typing import Callable
 import shutil
 from typing import Final
+import sys
 
 import flask
 import flask_login
@@ -193,13 +194,18 @@ def run_https():
 
     try:
         cert_gen = CertGen(hostname=HOSTNAME, ip_addresses=["127.0.0.1"])
+
+        # Check if certificate exists. If not, generate one
         if not os.path.exists(CERT_FILE) or not os.path.exists(KEY_FILE):
-            cert_gen.generate_self_signed_cert(cert_file=CERT_FILE, 
-                                               key_file=KEY_FILE)
-        elif cert_gen.is_certificate_valid(CERT_FILE):
+            # logger.info("Generating https certificate...")
+            print("Generating https certificate...") # TODO: remove this temporary print once logger is functional again
             cert_gen.generate_self_signed_cert(cert_file=CERT_FILE, key_file=KEY_FILE)
-        else:
-            print("Credentials already generated!")
+
+        # Check if the certificate is valid
+        if not cert_gen.is_certificate_valid(CERT_FILE):
+            # logger.error("Invalid certificate. Cannot start https application")
+            print("Invalid certificate. Cannot start https application") # TODO: remove this temporary print once logger is functional again
+            sys.exit(1)
 
         context = (CERT_FILE, KEY_FILE)
         app_restapi.run(
