@@ -1,22 +1,15 @@
 import os
-import platform
-import shutil
 import ssl
-import threading
 from pathlib import Path
-from typing import Callable, Final
+import threading
+from typing import Callable
+import shutil
+from typing import Final
+import sys
 
 import flask
 import flask_login
 from credentials import CertGen
-from plcapp_management import (
-    MAX_FILE_SIZE,
-    BuildStatus,
-    analyze_zip,
-    build_state,
-    run_compile,
-    safe_extract,
-)
 from restapi import (
     app_restapi,
     db,
@@ -25,6 +18,15 @@ from restapi import (
     restapi_bp,
 )
 from runtimemanager import RuntimeManager
+
+from plcapp_management import (
+    build_state,
+    BuildStatus,
+    analyze_zip,
+    run_compile,
+    safe_extract,
+    MAX_FILE_SIZE
+)
 
 # from logger import get_logger, LogParser
 
@@ -69,9 +71,8 @@ def handle_compilation_status(data: dict) -> dict:
     return {
         "status": build_state.status.name,
         "logs": build_state.logs[:],  # all lines
-        "exit_code": build_state.exit_code,
+        "exit_code": build_state.exit_code
     }
-
 
 def handle_status(data: dict) -> dict:
     response = runtime_manager.status_plc()
@@ -108,38 +109,26 @@ def restapi_callback_get(argument: str, data: dict) -> dict:
 
 def handle_upload_file(data: dict) -> dict:
     if build_state.status == BuildStatus.COMPILING:
-        return {
-            "UploadFileFail": "Runtime is compiling another program, please wait",
-            "CompilationStatus": build_state.status.name,
-        }
-
-    build_state.clear()  # remove all previous build logs
-
+        return {"UploadFileFail": "Runtime is compiling another program, please wait", "CompilationStatus": build_state.status.name}
+    
+    build_state.clear() # remove all previous build logs
+    
     if "file" not in flask.request.files:
         build_state.status = BuildStatus.FAILED
-        return {
-            "UploadFileFail": "No file part in the request",
-            "CompilationStatus": build_state.status.name,
-        }
-
+        return {"UploadFileFail": "No file part in the request", "CompilationStatus": build_state.status.name}
+    
     zip_file = flask.request.files["file"]
 
     if zip_file.content_length > MAX_FILE_SIZE:
         build_state.status = BuildStatus.FAILED
-        return {
-            "UploadFileFail": "File is too large",
-            "CompilationStatus": build_state.status.name,
-        }
-
+        return {"UploadFileFail": "File is too large", "CompilationStatus": build_state.status.name}
+    
     try:
         build_state.status = BuildStatus.UNZIPPING
         safe, valid_files = analyze_zip(zip_file)
         if not safe:
             build_state.status = BuildStatus.FAILED
-            return {
-                "UploadFileFail": "Uploaded ZIP file failed safety checks",
-                "CompilationStatus": build_state.status.name,
-            }
+            return {"UploadFileFail": "Uploaded ZIP file failed safety checks", "CompilationStatus": build_state.status.name}
 
         extract_dir = "core/generated"
         if os.path.exists(extract_dir):
@@ -151,30 +140,24 @@ def handle_upload_file(data: dict) -> dict:
         build_state.status = BuildStatus.COMPILING
 
         task_compile = threading.Thread(
-            target=run_compile,
-            args=(runtime_manager,),
-            kwargs={"cwd": extract_dir},
-            daemon=True,
+            target=run_compile, 
+            args=(runtime_manager,), 
+            kwargs={"cwd": extract_dir}, 
+            daemon=True
         )
-
+        
         task_compile.start()
 
         return {"UploadFileFail": "", "CompilationStatus": build_state.status.name}
-
+    
     except (OSError, IOError) as e:
         build_state.status = BuildStatus.FAILED
         build_state.log(f"[ERROR] File system error: {e}")
-        return {
-            "UploadFileFail": f"File system error: {e}",
-            "CompilationStatus": build_state.status.name,
-        }
+        return {"UploadFileFail": f"File system error: {e}", "CompilationStatus": build_state.status.name}
     except Exception as e:
         build_state.status = BuildStatus.FAILED
         build_state.log(f"[ERROR] Unexpected error: {e}")
-        return {
-            "UploadFileFail": f"Unexpected error: {e}",
-            "CompilationStatus": build_state.status.name,
-        }
+        return {"UploadFileFail": f"Unexpected error: {e}", "CompilationStatus": build_state.status.name}
 
 
 POST_HANDLERS: dict[str, Callable[[dict], dict]] = {
@@ -188,12 +171,11 @@ def restapi_callback_post(argument: str, data: dict) -> dict:
     """
     # logger.debug("POST | Received argument: %s, data: %s", argument, data)
     handler = POST_HANDLERS.get(argument)
-
+    
     if not handler:
         return {"PostRequestError": "Unknown argument"}
-
+    
     return handler(data)
-
 
 def run_https():
     # rest api register
@@ -206,24 +188,26 @@ def run_https():
             db.create_all()
             db.session.commit()
             # logger.info("Database tables created successfully.")
-        except Exception:
+        except Exception as e:
             # logger.error("Error creating database tables: %s", e)
             pass
 
     try:
         cert_gen = CertGen(hostname=HOSTNAME, ip_addresses=["127.0.0.1"])
-        if not os.path.exists(CERT_FILE) or not os.path.exists(KEY_FILE):
-            cert_gen.generate_self_signed_cert(
-                cert_file=str(CERT_FILE), key_file=str(KEY_FILE)
-            )
-        elif cert_gen.is_certificate_valid(str(CERT_FILE)):
-            cert_gen.generate_self_signed_cert(
-                cert_file=str(CERT_FILE), key_file=str(KEY_FILE)
-            )
-        else:
-            print("Credentials already generated!")
 
-        context = (str(CERT_FILE), str(KEY_FILE))
+        # Check if certificate exists. If not, generate one
+        if not os.path.exists(CERT_FILE) or not os.path.exists(KEY_FILE):
+            # logger.info("Generating https certificate...")
+            print("Generating https certificate...") # TODO: remove this temporary print once logger is functional again
+            cert_gen.generate_self_signed_cert(cert_file=CERT_FILE, key_file=KEY_FILE)
+
+        # Check if the certificate is valid
+        if not cert_gen.is_certificate_valid(CERT_FILE):
+            # logger.error("Invalid certificate. Cannot start https application")
+            print("Invalid certificate. Cannot start https application") # TODO: remove this temporary print once logger is functional again
+            sys.exit(1)
+
+        context = (CERT_FILE, KEY_FILE)
         app_restapi.run(
             debug=False,
             host="0.0.0.0",
@@ -232,10 +216,10 @@ def run_https():
             ssl_context=context,
         )
 
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         # logger.error("Could not find SSL credentials! %s", e)
         pass
-    except ssl.SSLError:
+    except ssl.SSLError as e:
         # logger.error("SSL credentials FAIL! %s", e)
         pass
     except KeyboardInterrupt:
@@ -246,39 +230,5 @@ def run_https():
         # logger.info("Runtime manager stopped")
 
 
-def run_http():
-    # rest api register
-    app_restapi.register_blueprint(restapi_bp, url_prefix="/api")
-    register_callback_get(restapi_callback_get)
-    register_callback_post(restapi_callback_post)
-
-    with app_restapi.app_context():
-        try:
-            db.create_all()
-            db.session.commit()
-            # logger.info("Database tables created successfully.")
-        except Exception:
-            # logger.error("Error creating database tables: %s", e)
-            pass
-
-    try:
-        app_restapi.run(
-            debug=False,
-            host="0.0.0.0",
-            threaded=True,
-            port=8080,
-        )
-
-    except KeyboardInterrupt:
-        # logger.info("HTTP server stopped by KeyboardInterrupt")
-        pass
-    finally:
-        runtime_manager.stop()
-        # logger.info("Runtime manager stopped")
-
-
 if __name__ == "__main__":
-    if platform.system() == "Linux":
-        run_https()
-    else:
-        run_http()
+    run_https()
