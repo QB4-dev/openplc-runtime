@@ -5,6 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void process_debug_data(uint8_t *data, size_t length);
+size_t process_debug_data(uint8_t *data, size_t length);
 
 #endif // DEBUG_HANDLER_H

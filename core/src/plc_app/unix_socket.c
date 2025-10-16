@@ -13,6 +13,7 @@
 #include "utils/log.h"
 #include "utils/utils.h"
 #include "plc_state_manager.h"
+#include "debug_handler.h"
 
 extern volatile sig_atomic_t keep_running;
 extern PLCState plc_state;
