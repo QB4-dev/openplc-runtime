@@ -42,9 +42,16 @@ def init_debug_websocket(app, unix_client_instance):
 
     @_socketio.on("connect")
     def handle_root_connect():
-        """Reject connections to root namespace - must use /api/debug"""
-        logger.warning("Connection attempt to root namespace - rejecting")
-        return False
+        """
+        Handle root namespace connections.
+        These typically occur during client disconnect polling fallback.
+        We silently accept but don't provide any functionality.
+        """
+        return True
+
+    @_socketio.on("disconnect")
+    def handle_root_disconnect():
+        """Handle root namespace disconnect - typically during cleanup"""
 
     @_socketio.on("connect", namespace="/api/debug")
     def handle_connect(auth):
