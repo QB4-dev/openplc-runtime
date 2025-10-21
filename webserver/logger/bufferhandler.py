@@ -11,17 +11,18 @@ class BufferHandler(logging.Handler):
     Custom logging handler that stores log records in memory (FIFO).
     Logs are formatted using the attached formatter (JSON).
     """
-    _instance = None
-    _lock = Lock()
-
     def __init__(self, capacity: int = 1000):
         super().__init__()
         self.buffer = deque(maxlen=capacity)
+        self.records = []  # Store formatted log records as strings
+        self._lock = Lock()
 
     def emit(self, record: logging.LogRecord) -> None:
         with self._lock:
             try:
-                self.buffer.append(self.format(record))
+                formatted_record = self.format(record)
+                self.records.append(formatted_record)
+                self.buffer.append(formatted_record)
             except Exception:
                 self.handleError(record)
 
@@ -86,17 +87,9 @@ class BufferHandler(logging.Handler):
 
         return normalized
 
-    @classmethod
-    def get_instance(cls):
-        """Singleton accessor."""
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = cls()
-        return cls._instance
-
     def clear(self) -> None:
         self.buffer.clear()
+        self.records.clear()
 
     def __len__(self):
         return len(self.buffer)

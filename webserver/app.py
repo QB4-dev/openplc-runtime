@@ -7,10 +7,9 @@ from typing import Callable, Final
 
 import flask
 import flask_login
-from credentials import CertGen
+from webserver.credentials import CertGen
 from debug_websocket import init_debug_websocket
-from logger import get_logger
-from plcapp_management import (
+from webserver.plcapp_management import (
     MAX_FILE_SIZE,
     BuildStatus,
     analyze_zip,
@@ -18,14 +17,15 @@ from plcapp_management import (
     run_compile,
     safe_extract,
 )
-from restapi import (
+from webserver.restapi import (
     app_restapi,
     db,
     register_callback_get,
     register_callback_post,
     restapi_bp,
 )
-from runtimemanager import RuntimeManager
+from webserver.runtimemanager import RuntimeManager
+from webserver.logger import get_logger, LogParser
 
 logger, _ = get_logger("logger", use_buffer=True)
 
