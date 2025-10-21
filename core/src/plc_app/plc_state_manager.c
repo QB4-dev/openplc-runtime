@@ -149,7 +149,17 @@ int plc_state_manager_init(void)
     pthread_mutex_lock(&state_mutex);
     plc_state = PLC_STATE_STOPPED;
 
-    plc_program = plugin_manager_create(libplc_file);
+    char *libplc_path = find_libplc_file(libplc_build_dir);
+    if (libplc_path == NULL)
+    {
+        log_error("Failed to find libplc file");
+        pthread_mutex_unlock(&state_mutex);
+        return -1;
+    }
+
+    plc_program = plugin_manager_create(libplc_path);
+    free(libplc_path);
+
     if (plc_program == NULL)
     {
         log_error("Failed to create PluginManager");
@@ -186,7 +196,16 @@ bool plc_set_state(PLCState new_state)
     {
         if (plc_program == NULL)
         {
-            plc_program = plugin_manager_create(libplc_file);
+            char *libplc_path = find_libplc_file(libplc_build_dir);
+            if (libplc_path == NULL)
+            {
+                log_error("Failed to find libplc file");
+                return false;
+            }
+
+            plc_program = plugin_manager_create(libplc_path);
+            free(libplc_path);
+
             if (plc_program == NULL)
             {
                 log_error("Failed to create PluginManager");

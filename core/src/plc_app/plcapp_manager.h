@@ -6,6 +6,14 @@
 typedef struct PluginManager PluginManager;
 
 /**
+ * @brief Find the libplc_*.so file in the build directory
+ *
+ * @param[in]  build_dir  The build directory to search
+ * @return A dynamically allocated string with the full path, or NULL on failure
+ */
+char *find_libplc_file(const char *build_dir);
+
+/**
  * @brief Create a plugin manager for a given .so path
  *
  * @param[in]  so_path  The path to the .so file
@@ -45,7 +53,6 @@ void *plugin_manager_get_symbol(PluginManager *pm, const char *symbol_name);
  * @param[in]  name  The name of the function
  * @return A pointer to the function, or NULL on failure
  */
-#define plugin_manager_get_func(pm, type, name)                                \
-    ((type)plugin_manager_get_symbol((pm), (name)))
+#define plugin_manager_get_func(pm, type, name) ((type)plugin_manager_get_symbol((pm), (name)))
 
 #endif // PLUGIN_MANAGER_H

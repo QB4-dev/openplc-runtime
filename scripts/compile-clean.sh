@@ -9,5 +9,11 @@ find . -maxdepth 1 -name "*.o" -type f -exec rm -f {} \;
 # Clean extra .o files from build dir if needed
 rm -f "$BUILD_DIR"/*.o
 
-# Move resulting shared library to standard name
-mv "$BUILD_DIR/libplc_new.so" "$BUILD_DIR/libplc.so"
+# Remove old libplc_*.so files to ensure only one exists
+rm -f "$BUILD_DIR"/libplc_*.so
+
+TIMESTAMP=$(date +%s%N)
+UNIQUE_LIBPLC="libplc_${TIMESTAMP}.so"
+
+# Move resulting shared library to unique name
+mv "$BUILD_DIR/libplc_new.so" "$BUILD_DIR/$UNIQUE_LIBPLC"

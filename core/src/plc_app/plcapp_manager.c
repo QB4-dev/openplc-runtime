@@ -1,4 +1,5 @@
 #include "plcapp_manager.h"
+#include <dirent.h>
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,12 +7,49 @@
 
 #include "utils/log.h"
 
-struct PluginManager {
+struct PluginManager
+{
     char *so_path;
     void *handle;
 };
 
-PluginManager *plugin_manager_create(const char *so_path) 
+char *find_libplc_file(const char *build_dir)
+{
+    DIR *dir = opendir(build_dir);
+    if (!dir)
+    {
+        log_error("Failed to open build directory: %s", build_dir);
+        return NULL;
+    }
+
+    struct dirent *entry;
+    char *found_path = NULL;
+
+    while ((entry = readdir(dir)) != NULL)
+    {
+        if (strncmp(entry->d_name, "libplc_", 7) == 0 && strstr(entry->d_name, ".so") != NULL)
+        {
+            size_t path_len = strlen(build_dir) + strlen(entry->d_name) + 2;
+            found_path      = malloc(path_len);
+            if (found_path)
+            {
+                snprintf(found_path, path_len, "%s/%s", build_dir, entry->d_name);
+            }
+            break;
+        }
+    }
+
+    closedir(dir);
+
+    if (!found_path)
+    {
+        log_error("No libplc_*.so file found in %s", build_dir);
+    }
+
+    return found_path;
+}
+
+PluginManager *plugin_manager_create(const char *so_path)
 {
     PluginManager *pm = calloc(1, sizeof(PluginManager));
     if (!pm)
@@ -19,11 +57,11 @@ PluginManager *plugin_manager_create(const char *so_path)
         return NULL;
     }
     pm->so_path = strdup(so_path);
-    pm->handle = NULL;
+    pm->handle  = NULL;
     return pm;
 }
 
-void plugin_manager_destroy(PluginManager *pm) 
+void plugin_manager_destroy(PluginManager *pm)
 {
     if (!pm)
     {
@@ -37,7 +75,7 @@ void plugin_manager_destroy(PluginManager *pm)
     free(pm);
 }
 
-bool plugin_manager_load(PluginManager *pm) 
+bool plugin_manager_load(PluginManager *pm)
 {
     if (!pm)
     {
@@ -49,7 +87,7 @@ bool plugin_manager_load(PluginManager *pm)
     }
 
     pm->handle = dlopen(pm->so_path, RTLD_NOW);
-    if (!pm->handle) 
+    if (!pm->handle)
     {
         log_error("Failed to load plugin %s: %s", pm->so_path, dlerror());
         return false;
@@ -57,7 +95,7 @@ bool plugin_manager_load(PluginManager *pm)
     return true;
 }
 
-void *plugin_manager_get_symbol(PluginManager *pm, const char *symbol_name) 
+void *plugin_manager_get_symbol(PluginManager *pm, const char *symbol_name)
 {
     if (!pm || !pm->handle)
     {
@@ -66,7 +104,7 @@ void *plugin_manager_get_symbol(PluginManager *pm, const char *symbol_name)
     dlerror(); // clear old error
     void *sym = dlsym(pm->handle, symbol_name);
     char *err = dlerror();
-    if (err) 
+    if (err)
     {
         log_error("dlsym error: %s", err);
         return NULL;

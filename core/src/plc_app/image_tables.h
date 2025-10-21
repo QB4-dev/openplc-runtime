@@ -5,7 +5,7 @@
 #include "plcapp_manager.h"
 
 #define BUFFER_SIZE 1024
-#define libplc_file "./build/libplc.so"
+#define libplc_build_dir "./build"
 
 // Internal buffers for I/O and memory.
 // Booleans
