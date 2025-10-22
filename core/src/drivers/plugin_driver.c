@@ -23,6 +23,7 @@ extern IEC_ULINT *lint_output[BUFFER_SIZE];
 extern IEC_UINT *int_memory[BUFFER_SIZE];
 extern IEC_UDINT *dint_memory[BUFFER_SIZE];
 extern IEC_ULINT *lint_memory[BUFFER_SIZE];
+static PyThreadState *main_tstate = NULL;
 static PyGILState_STATE gstate;
 
 // Prototypes
@@ -187,7 +188,8 @@ int plugin_driver_start(plugin_driver_t *driver)
         return -1;
     }
 
-    gstate = PyGILState_Ensure();
+    main_tstate = PyEval_SaveThread();
+    gstate      = PyGILState_Ensure();
 
     for (int i = 0; i < driver->plugin_count; i++)
     {
@@ -306,6 +308,7 @@ void plugin_driver_destroy(plugin_driver_t *driver)
     }
 
     PyGILState_Release(gstate);
+    PyEval_RestoreThread(main_tstate);
     Py_FinalizeEx();
     pthread_mutex_destroy(&driver->buffer_mutex);
 
