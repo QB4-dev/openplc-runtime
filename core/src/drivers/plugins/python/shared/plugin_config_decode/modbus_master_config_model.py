@@ -122,8 +122,8 @@ class ModbusDeviceConfig:
                 raise ValueError(f"Invalid function code (fc): {point.fc}. Must be a positive integer for device {self.name}, point {i}.")
             if not isinstance(point.offset, str) or not point.offset:
                 raise ValueError(f"Invalid offset: {point.offset}. Must be a non-empty string for device {self.name}, point {i}.")
-            if not isinstance(point.iec_location, str) or not point.iec_location:
-                raise ValueError(f"Invalid IEC location: {point.iec_location}. Must be a non-empty string for device {self.name}, point {i}.")
+            if not isinstance(point.iec_location, IECAddress):
+                raise ValueError(f"Invalid IEC location: {point.iec_location}. Must be an IECAddress object for device {self.name}, point {i}.")
             if not isinstance(point.length, int) or point.length <= 0:
                 raise ValueError(f"Invalid length: {point.length}. Must be a positive integer for device {self.name}, point {i}.")
 
