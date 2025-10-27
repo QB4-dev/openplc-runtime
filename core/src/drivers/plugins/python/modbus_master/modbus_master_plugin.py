@@ -399,7 +399,23 @@ class ModbusSlaveDevice(threading.Thread):
 
                         try:
                             # Convert offset string to integer
-                            address = int(point.offset)
+                            if not isinstance(point.offset, str) or not point.offset.strip():
+                                raise ValueError(f"Offset must be a non-empty string, got: {point.offset!r} (type: {type(point.offset)})")
+                            
+                            # Try to convert to integer, handling decimal and hexadecimal formats
+                            offset_str = point.offset.strip()
+                            try:
+                                # Support both decimal (123) and hexadecimal (0x1234, 0X1234) formats
+                                if offset_str.lower().startswith('0x'):
+                                    address = int(offset_str, 16)  # Hexadecimal
+                                else:
+                                    address = int(offset_str, 10)  # Decimal
+                            except ValueError as conv_err:
+                                raise ValueError(f"Cannot convert offset '{offset_str}' to integer (supports decimal or 0x hex): {conv_err}")
+                            
+                            if address < 0:
+                                raise ValueError(f"Offset must be non-negative, got: {address}")
+                            
                             count = point.length
                             
                             # Perform Modbus read based on function code
@@ -462,7 +478,22 @@ class ModbusSlaveDevice(threading.Thread):
 
                         try:
                             # Convert offset string to integer
-                            address = int(point.offset)
+                            if not isinstance(point.offset, str) or not point.offset.strip():
+                                raise ValueError(f"Offset must be a non-empty string, got: {point.offset!r} (type: {type(point.offset)})")
+                            
+                            # Try to convert to integer, handling decimal and hexadecimal formats
+                            offset_str = point.offset.strip()
+                            try:
+                                # Support both decimal (123) and hexadecimal (0x1234, 0X1234) formats
+                                if offset_str.lower().startswith('0x'):
+                                    address = int(offset_str, 16)  # Hexadecimal
+                                else:
+                                    address = int(offset_str, 10)  # Decimal
+                            except ValueError as conv_err:
+                                raise ValueError(f"Cannot convert offset '{offset_str}' to integer (supports decimal or 0x hex): {conv_err}")
+                            
+                            if address < 0:
+                                raise ValueError(f"Offset must be non-negative, got: {address}")
                             
                             # Read data from IEC buffers (with mutex)
                             lock_acquired, lock_msg = self.sba.acquire_mutex()
