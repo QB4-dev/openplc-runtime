@@ -69,6 +69,12 @@ class ModbusSlaveDevice(threading.Thread):
         self._stop_event = threading.Event()
         self.client: Optional[ModbusTcpClient] = None
         self.name = f"ModbusSlave-{device_config.name}-{device_config.host}:{device_config.port}"
+        
+        # Retry configuration - sistema simples
+        self.retry_delay_base = 2.0      # delay inicial entre tentativas (segundos)
+        self.retry_delay_max = 30.0      # delay máximo entre tentativas (segundos)
+        self.retry_delay_current = self.retry_delay_base
+        self.is_connected = False
 
     def _get_sba_access_details(self, iec_addr, is_write_op: bool = False) -> Optional[Dict[str, Any]]:
         """
@@ -177,6 +183,81 @@ class ModbusSlaveDevice(threading.Thread):
         except Exception as e:
             print(f"[{self.name}] ✗ Error in _get_sba_access_details: {e}")
             return None
+
+    def _connect_with_retry(self) -> bool:
+        """
+        Tenta conectar ao dispositivo Modbus com retry infinito.
+        
+        Returns:
+            True se conectou com sucesso, False se thread foi interrompida
+        """
+        host = self.device_config.host
+        port = self.device_config.port
+        timeout = self.device_config.timeout_ms / 1000.0
+        
+        retry_count = 0
+        
+        while not self._stop_event.is_set():
+            try:
+                # Criar novo cliente se necessário
+                if self.client is None or not self.client.connected:
+                    if self.client:
+                        try:
+                            self.client.close()
+                        except:
+                            pass
+                    self.client = ModbusTcpClient(host=host, port=port, timeout=timeout)
+                
+                # Tentar conectar
+                if self.client.connect():
+                    print(f"[{self.name}] ✓ Connected to {host}:{port} (attempt {retry_count + 1})")
+                    self.is_connected = True
+                    self.retry_delay_current = self.retry_delay_base  # Reset delay
+                    return True
+                
+            except Exception as e:
+                print(f"[{self.name}] ✗ Connection attempt {retry_count + 1} failed: {e}")
+            
+            # Incrementar contador e calcular delay
+            retry_count += 1
+            
+            # Log de tentativa
+            if retry_count == 1:
+                print(f"[{self.name}] ⚠ Failed to connect to {host}:{port}, starting retry attempts...")
+            elif retry_count % 10 == 0:  # Log a cada 10 tentativas
+                print(f"[{self.name}] ⚠ Connection attempt {retry_count} failed, continuing retries...")
+            
+            # Aguardar com delay crescente (backoff exponencial limitado)
+            delay = min(self.retry_delay_current, self.retry_delay_max)
+            
+            # Sleep em pequenos incrementos para permitir stop rápido
+            sleep_increments = int(delay * 10)  # 0.1s increments
+            for _ in range(sleep_increments):
+                if self._stop_event.is_set():
+                    return False
+                time.sleep(0.1)
+            
+            # Aumentar delay para próxima tentativa (máximo de retry_delay_max)
+            self.retry_delay_current = min(self.retry_delay_current * 1.5, self.retry_delay_max)
+        
+        return False
+
+    def _ensure_connection(self) -> bool:
+        """
+        Garante que há uma conexão válida, reconectando se necessário.
+        
+        Returns:
+            True se conexão está disponível, False se thread foi interrompida
+        """
+        # Verificar se já está conectado
+        if self.client and self.client.connected:
+            return True
+        
+        # Marcar como desconectado
+        self.is_connected = False
+        
+        # Tentar reconectar
+        return self._connect_with_retry()
 
     def _update_iec_buffer_from_modbus_data(self, iec_addr, modbus_data: list, length: int):
         """
@@ -363,9 +444,6 @@ class ModbusSlaveDevice(threading.Thread):
     def run(self):
         print(f"[{self.name}] Thread started.")
         
-        host = self.device_config.host
-        port = self.device_config.port
-        timeout = self.device_config.timeout_ms / 1000.0
         cycle_time = self.device_config.cycle_time_ms / 1000.0
         io_points = self.device_config.io_points
 
@@ -373,16 +451,18 @@ class ModbusSlaveDevice(threading.Thread):
             print(f"[{self.name}] No I/O points defined. Stopping thread.")
             return
 
-        self.client = ModbusTcpClient(host=host, port=port, timeout=timeout)
+        # Conectar com retry infinito
+        if not self._connect_with_retry():
+            print(f"[{self.name}] Thread stopped before connection could be established.")
+            return
 
         try:
-            if not self.client.connect():
-                print(f"[{self.name}] Failed to connect to {host}:{port}.")
-                return
-            print(f"[{self.name}] Connected to {host}:{port}.")
-
             while not self._stop_event.is_set():
                 cycle_start_time = time.monotonic()
+                
+                # Garantir que há conexão antes do ciclo
+                if not self._ensure_connection():
+                    break  # Thread foi interrompida
 
                 # 1. READ OPERATIONS - Collect all read requests and store results
                 read_requests = get_batch_read_requests_from_io_points(io_points)
@@ -434,9 +514,13 @@ class ModbusSlaveDevice(threading.Thread):
                             # Check if response is valid
                             if isinstance(response, (ModbusIOException, ExceptionResponse)):
                                 print(f"[{self.name}] ✗ Modbus read error (FC {fc}, addr {address}): {response}")
+                                # Marcar como desconectado para forçar reconexão no próximo ciclo
+                                self.is_connected = False
                                 continue
                             elif response.isError():
                                 print(f"[{self.name}] ✗ Modbus read failed (FC {fc}, addr {address}): {response}")
+                                # Marcar como desconectado para forçar reconexão no próximo ciclo
+                                self.is_connected = False
                                 continue
                             
                             # Extract data from response
@@ -450,8 +534,14 @@ class ModbusSlaveDevice(threading.Thread):
                             
                         except ValueError as ve:
                             print(f"[{self.name}] ✗ Invalid offset '{point.offset}' for FC {fc}: {ve}")
+                        except ConnectionException as ce:
+                            print(f"[{self.name}] ✗ Connection error reading FC {fc}, offset {point.offset}: {ce}")
+                            # Marcar como desconectado para forçar reconexão
+                            self.is_connected = False
                         except Exception as e:
                             print(f"[{self.name}] ✗ Error reading FC {fc}, offset {point.offset}: {e}")
+                            # Para outros erros também marcar desconectado por precaução
+                            self.is_connected = False
 
                 # Batch update IEC buffers with single mutex acquisition
                 if read_results_to_update:
@@ -534,13 +624,23 @@ class ModbusSlaveDevice(threading.Thread):
                             # Check write response
                             if isinstance(response, (ModbusIOException, ExceptionResponse)):
                                 print(f"[{self.name}] ✗ Modbus write error (FC {fc}, addr {address}): {response}")
+                                # Marcar como desconectado para forçar reconexão no próximo ciclo
+                                self.is_connected = False
                             elif response.isError():
                                 print(f"[{self.name}] ✗ Modbus write failed (FC {fc}, addr {address}): {response}")
+                                # Marcar como desconectado para forçar reconexão no próximo ciclo
+                                self.is_connected = False
                             
                         except ValueError as ve:
                             print(f"[{self.name}] ✗ Invalid offset '{point.offset}' for FC {fc}: {ve}")
+                        except ConnectionException as ce:
+                            print(f"[{self.name}] ✗ Connection error writing FC {fc}, offset {point.offset}: {ce}")
+                            # Marcar como desconectado para forçar reconexão
+                            self.is_connected = False
                         except Exception as e:
                             print(f"[{self.name}] ✗ Error writing FC {fc}, offset {point.offset}: {e}")
+                            # Para outros erros também marcar desconectado por precaução
+                            self.is_connected = False
                 
                 # 3. CYCLE TIMING
                 cycle_elapsed = time.monotonic() - cycle_start_time
@@ -555,7 +655,9 @@ class ModbusSlaveDevice(threading.Thread):
                         break
 
         except ConnectionException as ce:
-            print(f"[{self.name}] ✗ Connection failed to {host}:{port}: {ce}")
+            print(f"[{self.name}] ✗ Connection failed: {ce}")
+            # Tentar reconectar
+            self.is_connected = False
         except Exception as e:
             print(f"[{self.name}] ✗ Unexpected error in thread: {e}")
             traceback.print_exc()
