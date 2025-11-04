@@ -188,6 +188,12 @@ int plugin_driver_start(plugin_driver_t *driver)
         return -1;
     }
 
+    if (driver->plugin_count == 0)
+    {
+        printf("[PLUGIN]: No plugins to start.\n");
+        return 0;
+    }
+
     main_tstate = PyEval_SaveThread();
     gstate      = PyGILState_Ensure();
 
@@ -249,6 +255,12 @@ int plugin_driver_stop(plugin_driver_t *driver)
         return -1;
     }
 
+    if (driver->plugin_count == 0)
+    {
+        printf("[PLUGIN]: No plugins to stop.\n");
+        return 0;
+    }
+
     // Signal all plugins to stop
     for (int i = 0; i < driver->plugin_count; i++)
     {
@@ -286,6 +298,12 @@ void plugin_driver_destroy(plugin_driver_t *driver)
 {
     if (!driver)
     {
+        return;
+    }
+
+    if (driver->plugin_count == 0)
+    {
+        printf("[PLUGIN]: No plugins to destroy.\n");
         return;
     }
 
