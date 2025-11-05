@@ -3,8 +3,8 @@
 /core/generated/
 /memory-bank
 
-# .vscode/
-.*/
+.vscode/
+#.*/
 /venvs/
 __pycache__/
 .clinerules
