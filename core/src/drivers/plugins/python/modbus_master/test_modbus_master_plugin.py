@@ -1,58 +1,141 @@
-# core/src/drivers/plugins/python/modbus_master/test_modbus_master_plugin.py
-
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
-# Assume this is your modbus master module
-from core.src.drivers.plugins.python.modbus_master import modbus_master_plugin
-
-def test_modbus_master_reads(mock_modbus_server):
-    """
-    Test that modbus master reads registers from the mock server.
-    """
-    # Patch the master so that instead of a real Modbus client,
-    # it uses our fake server internally.
-    with patch.object(modbus_master_plugin, "read_holding_registers", side_effect=mock_modbus_server.read_holding_registers):
-        result = modbus_master_plugin.read_holding_registers(0, 5)
-        assert result == [17, 17, 17, 17, 17]
-
-def test_modbus_master_writes(mock_modbus_server):
-    """
-    Test that modbus master writes registers to the mock server.
-    """
-    with patch.object(modbus_master_plugin, "write_register", side_effect=mock_modbus_server.write_register):
-        ok = modbus_master_plugin.write_register(10, 123)
-        assert ok is True
-        assert mock_modbus_server.holding_registers[10] == 123
+# Import your plugin
+import modbus_master_plugin as plugin
 
 
-# from pymodbus.client import ModbusTcpClient
-# import pytest
-
-# def test_modbus_master_reads(modbus_server):
-#     """Ensure the Modbus master can read holding registers."""
-#     client = ModbusTcpClient("localhost", port=5020)
-#     assert client.connect(), "Client could not connect"
-
-#     rr = client.read_holding_registers(0, 10)
-#     assert not rr.isError()
-#     assert rr.registers == [17] * 10
-
-#     client.close()
-
-
-# @pytest.fixture
-# def modbus_master_plugin():
-#     """Example fixture for your plugin (simplified)."""
-#     from core.src.drivers.plugins.python.modbus_master import modbus_master_plugin
-#     plugin = modbus_master_plugin.ModbusMasterPlugin("localhost", 5020)
-#     yield plugin
-#     plugin.stop()
+@pytest.fixture(autouse=True)
+def reset_globals():
+    """Ensure clean globals before and after each test."""
+    plugin.runtime_args = None
+    plugin.modbus_master_config = None
+    plugin.safe_buffer_accessor = None
+    plugin.slave_threads = []
+    yield
+    plugin.runtime_args = None
+    plugin.modbus_master_config = None
+    plugin.safe_buffer_accessor = None
+    plugin.slave_threads = []
 
 
-# def test_plugin_reads(modbus_server, modbus_master_plugin):
-#     """Test the plugin's synchronous read interface."""
-#     modbus_master_plugin.start()
-#     data = modbus_master_plugin.read(fc=3, address=0, count=10)
-#     assert all(value == 17 for value in data)
-#     modbus_master_plugin.stop()
+# ---------------------------------------------------------------------
+# INIT TESTS
+# ---------------------------------------------------------------------
+@patch("modbus_master_plugin.safe_extract_runtime_args_from_capsule")
+@patch("modbus_master_plugin.SafeBufferAccess")
+@patch("modbus_master_plugin.ModbusMasterConfig")
+def test_init_success(mock_cfg, mock_buf, mock_extract):
+    # --- mock extract ---
+    mock_extract.return_value = ({"arg": 123}, None)
+
+    # --- mock SafeBufferAccess ---
+    mock_accessor = MagicMock()
+    mock_accessor.is_valid = True
+    mock_accessor.get_config_path.return_value = ("/fake/config.json", None)
+    mock_buf.return_value = mock_accessor
+
+    # --- mock ModbusMasterConfig ---
+    mock_cfg_instance = MagicMock()
+    mock_cfg_instance.devices = ["dev1"]
+    mock_cfg.return_value = mock_cfg_instance
+
+    ok = plugin.init("capsule")
+
+    assert ok is True
+    mock_extract.assert_called_once()
+    mock_buf.assert_called_once()
+    mock_cfg_instance.import_config_from_file.assert_called_with("/fake/config.json")
+    mock_cfg_instance.validate.assert_called_once()
+    assert plugin.safe_buffer_accessor == mock_accessor
+    assert plugin.modbus_master_config == mock_cfg_instance
+
+
+@patch("modbus_master_plugin.safe_extract_runtime_args_from_capsule", return_value=(None, "bad"))
+def test_init_fail_on_capsule(mock_extract):
+    ok = plugin.init("capsule")
+    assert ok is False
+    assert plugin.runtime_args is None
+
+
+# ---------------------------------------------------------------------
+# START LOOP TESTS
+# ---------------------------------------------------------------------
+@patch("modbus_master_plugin.ModbusSlaveDevice")
+def test_start_loop_success(mock_device_class):
+    # Prepare mock config with 2 fake devices
+    dev1 = MagicMock(name="Device1")
+    dev1.name = "A"
+    dev1.host = "127.0.0.1"
+    dev1.port = 1502
+    dev2 = MagicMock(name="Device2")
+    dev2.name = "B"
+    dev2.host = "127.0.0.1"
+    dev2.port = 1503
+
+    plugin.modbus_master_config = MagicMock()
+    plugin.modbus_master_config.devices = [dev1, dev2]
+    plugin.safe_buffer_accessor = MagicMock()
+
+    # Return a new mock per call
+    fake_threads = [MagicMock(name="Thread1"), MagicMock(name="Thread2")]
+    mock_device_class.side_effect = fake_threads  # one per call
+
+    ok = plugin.start_loop()
+
+    assert ok is True
+    assert mock_device_class.call_count == 2
+    assert len(plugin.slave_threads) == 2
+
+    for t in fake_threads:
+        t.start.assert_called_once()
+
+
+
+def test_start_loop_without_init():
+    plugin.modbus_master_config = None
+    plugin.safe_buffer_accessor = None
+    ok = plugin.start_loop()
+    assert ok is False
+
+
+# ---------------------------------------------------------------------
+# STOP LOOP TESTS
+# ---------------------------------------------------------------------
+def test_stop_loop_success():
+    t1 = MagicMock(name="T1")
+    t2 = MagicMock(name="T2")
+    plugin.slave_threads = [t1, t2]
+
+    ok = plugin.stop_loop()
+
+    assert ok is True
+    for t in [t1, t2]:
+        t.stop.assert_called_once()
+        t.join.assert_called_once()
+
+
+def test_stop_loop_no_threads():
+    plugin.slave_threads = []
+    ok = plugin.stop_loop()
+    assert ok is True
+
+
+# ---------------------------------------------------------------------
+# CLEANUP TESTS
+# ---------------------------------------------------------------------
+@patch("modbus_master_plugin.stop_loop")
+def test_cleanup_success(mock_stop):
+    plugin.runtime_args = {"arg": 1}
+    plugin.modbus_master_config = MagicMock()
+    plugin.safe_buffer_accessor = MagicMock()
+    plugin.slave_threads = [MagicMock()]
+
+    ok = plugin.cleanup()
+
+    assert ok is True
+    mock_stop.assert_called_once()
+    assert plugin.runtime_args is None
+    assert plugin.modbus_master_config is None
+    assert plugin.safe_buffer_accessor is None
+    assert plugin.slave_threads == []

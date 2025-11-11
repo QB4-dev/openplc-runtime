@@ -37,7 +37,7 @@ def fake_modbus_client(monkeypatch):
     mock_client.connected = True
     mock_client.connect.return_value = True
     mock_client.close.return_value = None
-    monkeypatch.setattr("your_module.ModbusTcpClient", lambda *a, **kw: mock_client)
+    monkeypatch.setattr("ModbusSlaveDevice.ModbusTcpClient", lambda *a, **kw: mock_client)
     return mock_client
 
 @pytest.fixture
