@@ -1,5 +1,5 @@
 import pytest
-from modbus_master_config_model import (
+from .modbus_master_config_model import (
     parse_iec_address,
     ModbusIoPointConfig,
     ModbusDeviceConfig,
