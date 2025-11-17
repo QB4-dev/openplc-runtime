@@ -35,6 +35,8 @@ echo "🧪 Installing pytest and local package..."
 pip install pytest
 pip install -e "$PROJECT_ROOT"
 
+pip install -r "$PROJECT_ROOT/core/src/drivers/plugins/python/modbus_master/requirements.txt"
+
 if [ ! -f "$PROJECT_ROOT/pytest.ini" ]; then
     echo "⚙️  Creating default pytest.ini..."
     cat <<EOF > "$PROJECT_ROOT/pytest.ini"
@@ -48,7 +50,9 @@ fi
 
 # Existing conftest.py with fixtures is preserved; no need to create or overwrite.
 
-echo "🧪 Running pytest..."
-pytest -vvv
+echo "🧪 Running pytest on REST API..."
+pytest -vvv tests/pytest
 
+echo "🧪 Running driver plugin tests..."
+pytest -vvv core/src/drivers/plugins/python/
 echo "✅ All done!"
