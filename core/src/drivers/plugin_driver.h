@@ -19,15 +19,18 @@ typedef enum
 typedef int (*plugin_init_func_t)(void *);
 typedef void (*plugin_start_loop_func_t)();
 typedef void (*plugin_stop_loop_func_t)();
-typedef void (*plugin_run_cycle_func_t)();
+typedef void (*plugin_cycle_start_func_t)();
+typedef void (*plugin_cycle_end_func_t)();
 typedef void (*plugin_cleanup_func_t)();
 
 typedef struct
 {
+    void *handle; // Handle to the loaded shared library
     plugin_init_func_t init;
     plugin_start_loop_func_t start;
     plugin_stop_loop_func_t stop;
-    plugin_run_cycle_func_t run_cycle;
+    plugin_cycle_start_func_t cycle_start;
+    plugin_cycle_end_func_t cycle_end;
     plugin_cleanup_func_t cleanup;
 } plugin_funct_bundle_t;
 
@@ -65,6 +68,7 @@ typedef struct plugin_instance_s
 {
     PluginManager *manager;
     python_binds_t *python_plugin;
+    plugin_funct_bundle_t *native_plugin;
     // pthread_t thread;
     int running;
     plugin_config_t config;
@@ -90,6 +94,9 @@ int plugin_mutex_give(pthread_mutex_t *mutex);
 
 // Python plugin functions
 int python_plugin_get_symbols(plugin_instance_t *plugin);
+
+// Native plugin functions
+int native_plugin_get_symbols(plugin_instance_t *plugin);
 
 // Runtime arguments generation
 void *generate_structured_args_with_driver(plugin_type_t type, plugin_driver_t *driver,
