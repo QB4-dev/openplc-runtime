@@ -55,7 +55,7 @@ def init_debug_websocket(app, unix_client_instance):
     _socketio = SocketIO(
         app,
         cors_allowed_origins="*",
-        async_mode="eventlet",
+        async_mode="threading",
         logger=False,
         engineio_logger=False,
         ping_timeout=60,
