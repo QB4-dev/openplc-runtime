@@ -6,6 +6,7 @@
 .vscode/
 #.*/
 /venvs/
+.venv/
 __pycache__/
 .clinerules
 
