@@ -3,6 +3,7 @@ Flask-Login
 Flask-JWT-Extended>=4.6.0
 flask_sqlalchemy
 Flask-SocketIO
+eventlet
 PyJWT
 python-dotenv
 pytest
