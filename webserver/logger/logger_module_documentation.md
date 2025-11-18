@@ -192,7 +192,7 @@ for record in buffer.buffer:
 
 ---
 
-## 🧪 Development & Testing
+## Development & Testing
 
 This section guides developers on how to **test and validate the logging module** during development.
 
