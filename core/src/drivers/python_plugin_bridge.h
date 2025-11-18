@@ -15,6 +15,7 @@ typedef struct
     PyObject *pFuncStart;
     PyObject *pFuncStop;
     PyObject *pFuncCleanup;
+    PyObject *args_capsule; // Capsule containing plugin_runtime_args_t for lifetime management
 } python_binds_t;
 
 #endif // __PYTHON_PLUGIN_BRIDGE_H

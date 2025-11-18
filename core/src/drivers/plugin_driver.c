@@ -160,7 +160,9 @@ int plugin_driver_init(plugin_driver_t *driver)
             // Call the Python init function with proper capsule
             PyObject *result =
                 PyObject_CallFunctionObjArgs(plugin->python_plugin->pFuncInit, args, NULL);
-            Py_SET_REFCNT(args, UINT64_MAX);
+
+            // Store the capsule reference for the lifetime of the plugin
+            plugin->python_plugin->args_capsule = args;
 
             if (!result)
             {
@@ -639,6 +641,7 @@ static void python_plugin_cleanup(plugin_instance_t *plugin)
         Py_XDECREF(plugin->python_plugin->pFuncStop);
         Py_XDECREF(plugin->python_plugin->pFuncCleanup);
         Py_XDECREF(plugin->python_plugin->pModule);
+        Py_XDECREF(plugin->python_plugin->args_capsule);
 
         free(plugin->python_plugin);
         plugin->python_plugin = NULL;
