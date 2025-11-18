@@ -192,15 +192,15 @@ sio = socketio.Client(ssl_verify=False)
 
 @sio.event(namespace='/api/debug')
 def connect():
-    print("✓ Connected to WebSocket!")
+    print("Connected to WebSocket!")
 
 @sio.event(namespace='/api/debug')
 def connected(data):
-    print(f"✓ Server confirmed: {data}")
+    print(f"Server confirmed: {data}")
 
 @sio.event(namespace='/api/debug')
 def debug_response(data):
-    print(f"\n✓ Debug response:")
+    print(f"\nDebug response:")
     print(f"  Success: {data.get('success')}")
     if data.get('success'):
         print(f"  Data: {data.get('data')}")
@@ -209,7 +209,7 @@ def debug_response(data):
 
 @sio.event(namespace='/api/debug')
 def disconnect():
-    print("✗ Disconnected")
+    print("Disconnected")
 
 # Connect with token in auth dict (preferred method)
 try:

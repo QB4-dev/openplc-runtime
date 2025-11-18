@@ -160,7 +160,7 @@ int plugin_driver_init(plugin_driver_t *driver)
             // Call the Python init function with proper capsule
             PyObject *result =
                 PyObject_CallFunctionObjArgs(plugin->python_plugin->pFuncInit, args, NULL);
-
+            
             // Store the capsule reference for the lifetime of the plugin
             plugin->python_plugin->args_capsule = args;
 
@@ -596,10 +596,10 @@ int python_plugin_get_symbols(plugin_instance_t *plugin)
     plugin->python_plugin = py_binds;
 
     printf("Python plugin '%s' symbols loaded successfully\n", module_name);
-    printf("  - init: %s\n", py_binds->pFuncInit ? "✓" : "✗");
-    printf("  - start_loop: %s\n", py_binds->pFuncStart ? "✓" : "✗");
-    printf("  - stop_loop: %s\n", py_binds->pFuncStop ? "✓" : "✗");
-    printf("  - cleanup: %s\n", py_binds->pFuncCleanup ? "✓" : "✗");
+    printf("  - init: %s\n", py_binds->pFuncInit ? "OK" : "Failed");
+    printf("  - start_loop: %s\n", py_binds->pFuncStart ? "OK" : "Failed");
+    printf("  - stop_loop: %s\n", py_binds->pFuncStop ? "OK" : "Failed");
+    printf("  - cleanup: %s\n", py_binds->pFuncCleanup ? "OK" : "Failed");
 
     return 0;
 }

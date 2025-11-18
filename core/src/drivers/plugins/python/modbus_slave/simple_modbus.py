@@ -311,14 +311,14 @@ def init(args_capsule):
             # This is a PyCapsule from C - use safe extraction
             runtime_args, error_msg = safe_extract_runtime_args_from_capsule(args_capsule)
             if runtime_args is None:
-                print(f"[MODBUS] ✗ Failed to extract runtime args: {error_msg}")
+                print(f"[MODBUS] Failed to extract runtime args: {error_msg}")
                 return False
             
-            print(f"[MODBUS] ✓ Runtime arguments extracted successfully")
+            print(f"[MODBUS] Runtime arguments extracted successfully")
         else:
             # This is a direct object (for testing)
             runtime_args = args_capsule
-            print(f"[MODBUS] ✓ Using direct runtime args for testing")
+            print(f"[MODBUS] Using direct runtime args for testing")
         
         # Try to load configuration from plugin_specific_config_file_path
         try:
@@ -329,21 +329,21 @@ def init(args_capsule):
                 if network_config and 'host' in network_config and 'port' in network_config:
                     gIp = str(network_config['host'])
                     gPort = int(network_config['port'])
-                    print(f"[MODBUS] ✓ Configuration loaded - Host: {gIp}, Port: {gPort}")
+                    print(f"[MODBUS] Configuration loaded - Host: {gIp}, Port: {gPort}")
                 else:
-                    print(f"[MODBUS] ⚠ Config file loaded but network_configuration section missing or incomplete - using defaults")
+                    print(f"[MODBUS] Config file loaded but network_configuration section missing or incomplete - using defaults")
                     print(f"[MODBUS] Available config sections: {list(config_map.keys())}")
             else:
-                print(f"[MODBUS] ✗ Failed to load configuration file: {status} - using defaults")
+                print(f"[MODBUS] Failed to load configuration file: {status} - using defaults")
         except Exception as config_error:
-            print(f"[MODBUS] ⚠ Exception while loading config: {config_error} - using defaults")
+            print(f"[MODBUS] Exception while loading config: {config_error} - using defaults")
             import traceback
             traceback.print_exc()
 
         # Safely access buffer size using validation
         buffer_size, size_error = runtime_args.safe_access_buffer_size()
         if buffer_size == -1:
-            print(f"[MODBUS] ✗ Failed to access buffer size: {size_error}")
+            print(f"[MODBUS] Failed to access buffer size: {size_error}")
             return False
         
         # print(f"[MODBUS]   Buffer size: {buffer_size}")
@@ -371,11 +371,11 @@ def init(args_capsule):
         )
         server_context = ModbusServerContext(devices={1: device}, single=False)
         
-        print(f"[MODBUS] ✓ Plugin initialized successfully - Host: {gIp}, Port: {gPort}")
+        print(f"[MODBUS] Plugin initialized successfully - Host: {gIp}, Port: {gPort}")
         return True
         
     except Exception as e:
-        print(f"[MODBUS] ✗ Plugin initialization failed: {e}")
+        print(f"[MODBUS] Plugin initialization failed: {e}")
         import traceback
         traceback.print_exc()
         return False
