@@ -70,6 +70,7 @@ install_deps_apt() {
         gcc \
         make \
         cmake \
+        pkg-config \
     && rm -rf /var/lib/apt/lists/*
 }
 
