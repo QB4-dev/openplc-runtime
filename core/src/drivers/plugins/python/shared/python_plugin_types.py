@@ -1126,9 +1126,8 @@ class SafeBufferAccess:
             return 0, f"Invalid runtime args: {self.error_msg}"
 
         try:
-            size = ctypes.c_size_t()
-            size.value = self.args.get_var_size(ctypes.c_size_t(index))
-            return size.value, "Success"
+            size = self.args.get_var_size(ctypes.c_size_t(index))
+            return size, "Success"
 
         except (AttributeError, TypeError, ValueError, OverflowError, OSError, MemoryError) as e:
             return 0, f"Exception during get_var_size: {e}"
