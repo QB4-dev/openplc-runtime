@@ -1125,7 +1125,7 @@ class SafeBufferAccess:
 
         try:
             size = ctypes.c_size_t()
-            self.args.get_var_size(ctypes.c_size_t(index), ctypes.byref(size))
+            size.value = self.args.get_var_size(ctypes.c_size_t(index))
             return size.value, "Success"
 
         except (AttributeError, TypeError, ValueError, OverflowError, OSError, MemoryError) as e:
