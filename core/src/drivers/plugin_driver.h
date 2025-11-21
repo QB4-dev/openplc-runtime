@@ -6,6 +6,7 @@
 #include "plugin_config.h"
 #include "python_plugin_bridge.h"
 #include <pthread.h>
+#include <stdint.h>
 
 // Maximum number of plugins
 #define MAX_PLUGINS 16
@@ -57,6 +58,7 @@ typedef struct
     int (*mutex_give)(pthread_mutex_t *mutex);
     void (*get_var_list)(size_t num_vars, size_t *indexes, void **result);
     size_t (*get_var_size)(size_t idx);
+    uint16_t (*get_var_count)(void);
     pthread_mutex_t *buffer_mutex;
     char plugin_specific_config_file_path[256];
 

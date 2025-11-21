@@ -21,3 +21,8 @@ size_t get_var_size(size_t idx)
 {
     return ext_get_var_size(idx);
 }
+
+uint16_t get_var_count(void)
+{
+    return ext_get_var_count();
+}
