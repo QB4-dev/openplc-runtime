@@ -1130,6 +1130,202 @@ class SafeBufferAccess:
 
         except (AttributeError, TypeError, ValueError, OverflowError, OSError, MemoryError) as e:
             return 0, f"Exception during get_var_size: {e}"
+    
+    def _infer_var_type_from_size(self, size):
+        """
+        Infer variable type based on size (since get_var_type doesn't exist in the C API)
+        Based on debug.c size mappings:
+        - BOOL/BOOL_O: sizeof(BOOL) = 1 byte
+        - SINT: sizeof(SINT) = 1 byte  
+        - TIME: sizeof(TIME) = 4 or 8 bytes
+        Args:
+            size: Size in bytes
+        Returns: str - Inferred type name for debugging
+        """
+        if size == 1:
+            return "BOOL_OR_SINT"  # Cannot distinguish between BOOL and SINT by size alone
+        elif size == 2:
+            return "UINT16"
+        elif size == 4:
+            return "UINT32_OR_TIME"
+        elif size == 8:
+            return "UINT64_OR_TIME"
+        else:
+            return "UNKNOWN"
+
+    def get_var_value(self, index):
+        """
+        Read a variable value by index with automatic type handling based on size
+        Args:
+            index: Integer index of the variable
+        Returns: (value, str) - (value, error_message)
+        """
+        if not self.is_valid:
+            return None, f"Invalid runtime args: {self.error_msg}"
+
+        try:
+            # Get variable address and size
+            addresses, addr_err = self.get_var_list([index])
+            if not addresses or addresses[0] is None:
+                return None, f"Failed to get variable address: {addr_err}"
+            
+            size, size_err = self.get_var_size(index)
+            if size == 0:
+                return None, f"Failed to get variable size: {size_err}"
+
+            address = addresses[0]
+            
+            # Read value based on size (since we can't determine exact type)
+            if size == 1:
+                # Could be BOOL, BOOL_O, or SINT - read as unsigned and let user interpret
+                value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint8))
+                value = value_ptr.contents.value
+                return value, "Success"
+            
+            elif size == 2:
+                # 16-bit unsigned integer
+                value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint16))
+                value = value_ptr.contents.value
+                return value, "Success"
+            
+            elif size == 4:
+                # 32-bit unsigned integer (could be TIME)
+                value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint32))
+                value = value_ptr.contents.value
+                return value, "Success"
+            
+            elif size == 8:
+                # 64-bit unsigned integer (could be TIME)
+                value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint64))
+                value = value_ptr.contents.value
+                return value, "Success"
+            
+            else:
+                return None, f"Unsupported variable size: {size}"
+
+        except (AttributeError, TypeError, ValueError, OverflowError, OSError, MemoryError) as e:
+            return None, f"Exception during get_var_value: {e}"
+    
+    def set_var_value(self, index, value):
+        """
+        Write a variable value by index with size-based validation
+        Args:
+            index: Integer index of the variable
+            value: Value to write
+        Returns: (bool, str) - (success, error_message)
+        """
+        if not self.is_valid:
+            return False, f"Invalid runtime args: {self.error_msg}"
+
+        try:
+            # Get variable address and size
+            addresses, addr_err = self.get_var_list([index])
+            if not addresses or addresses[0] is None:
+                return False, f"Failed to get variable address: {addr_err}"
+            
+            size, size_err = self.get_var_size(index)
+            if size == 0:
+                return False, f"Failed to get variable size: {size_err}"
+
+            address = addresses[0]
+            
+            # Validate value type
+            if not isinstance(value, (bool, int)):
+                return False, f"Invalid value type: expected bool or int, got {type(value)}"
+            
+            # Convert boolean to integer
+            if isinstance(value, bool):
+                value = 1 if value else 0
+            
+            # Validate and write value based on size
+            if size == 1:
+                # 8-bit value (BOOL, BOOL_O, or SINT)
+                if not (0 <= value <= 255):
+                    return False, f"Invalid value: {value} (must be 0-255 for 8-bit)"
+                value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint8))
+                value_ptr.contents.value = value
+                return True, "Success"
+            
+            elif size == 2:
+                # 16-bit unsigned integer
+                if not (0 <= value <= 65535):
+                    return False, f"Invalid value: {value} (must be 0-65535 for 16-bit)"
+                value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint16))
+                value_ptr.contents.value = value
+                return True, "Success"
+            
+            elif size == 4:
+                # 32-bit unsigned integer
+                if not (0 <= value <= 4294967295):
+                    return False, f"Invalid value: {value} (must be 0-4294967295 for 32-bit)"
+                value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint32))
+                value_ptr.contents.value = value
+                return True, "Success"
+            
+            elif size == 8:
+                # 64-bit unsigned integer
+                if not (0 <= value <= 18446744073709551615):
+                    return False, f"Invalid value: {value} (must be 0-18446744073709551615 for 64-bit)"
+                value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint64))
+                value_ptr.contents.value = value
+                return True, "Success"
+            
+            else:
+                return False, f"Unsupported variable size: {size}"
+
+        except (AttributeError, TypeError, ValueError, OverflowError, OSError, MemoryError) as e:
+            return False, f"Exception during set_var_value: {e}"
+    
+    def get_var_count(self):
+        """
+        Get the total number of debug variables available
+        Returns: (int, str) - (count, error_message)
+        """
+        if not self.is_valid:
+            return 0, f"Invalid runtime args: {self.error_msg}"
+
+        try:
+            count = self.args.get_var_count()
+            return count, "Success"
+
+        except (AttributeError, TypeError, ValueError, OverflowError, OSError, MemoryError) as e:
+            return 0, f"Exception during get_var_count: {e}"
+    
+    def get_var_info(self, index):
+        """
+        Get comprehensive information about a variable
+        Args:
+            index: Integer index of the variable
+        Returns: (dict, str) - (info_dict, error_message)
+                info_dict format: {'address': int, 'size': int, 'inferred_type': str}
+        """
+        if not self.is_valid:
+            return {}, f"Invalid runtime args: {self.error_msg}"
+
+        try:
+            # Get variable address
+            addresses, addr_err = self.get_var_list([index])
+            if not addresses or addresses[0] is None:
+                return {}, f"Failed to get variable address: {addr_err}"
+            
+            # Get variable size
+            size, size_err = self.get_var_size(index)
+            if size == 0:
+                return {}, f"Failed to get variable size: {size_err}"
+
+            # Infer type from size
+            inferred_type = self._infer_var_type_from_size(size)
+
+            info = {
+                'address': addresses[0],
+                'size': size,
+                'inferred_type': inferred_type
+            }
+
+            return info, "Success"
+
+        except (AttributeError, TypeError, ValueError, OverflowError, OSError, MemoryError) as e:
+            return {}, f"Exception during get_var_info: {e}"
 
     # Batch operations for optimized mutex usage
     def batch_read_values(self, operations):
