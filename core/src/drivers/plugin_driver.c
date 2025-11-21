@@ -471,6 +471,7 @@ void *generate_structured_args_with_driver(plugin_type_t type, plugin_driver_t *
     args->mutex_take = plugin_mutex_take;
     args->mutex_give = plugin_mutex_give;
     args->get_var_list = get_var_list;
+    args->get_var_size = get_var_size;
     // Set buffer mutex from driver
     args->buffer_mutex = &driver->buffer_mutex;
 

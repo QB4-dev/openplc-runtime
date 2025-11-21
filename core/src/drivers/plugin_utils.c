@@ -16,3 +16,8 @@ void get_var_list(size_t num_vars, size_t *indexes, void **result)
         }
     }
 }
+
+size_t get_var_size(size_t idx)
+{
+    return ext_get_var_size(idx);
+}

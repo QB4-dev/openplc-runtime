@@ -56,6 +56,7 @@ typedef struct
     int (*mutex_take)(pthread_mutex_t *mutex);
     int (*mutex_give)(pthread_mutex_t *mutex);
     void (*get_var_list)(size_t num_vars, size_t *indexes, void **result);
+    size_t (*get_var_size)(size_t idx);
     pthread_mutex_t *buffer_mutex;
     char plugin_specific_config_file_path[256];
 

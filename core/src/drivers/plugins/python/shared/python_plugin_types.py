@@ -44,6 +44,7 @@ class PluginRuntimeArgs(ctypes.Structure):
         # Mutex function pointers
         ("mutex_take", ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)),
         ("mutex_give", ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)),
+        ("get_var_list", ctypes.CFUNCTYPE(None, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(ctypes.c_void_p))),
         ("buffer_mutex", ctypes.c_void_p),
         ("plugin_specific_config_file_path", ctypes.c_char * 256),
         
@@ -1063,14 +1064,73 @@ class SafeBufferAccess:
         """
         if not self.is_valid:
             return False, f"Invalid runtime args: {self.error_msg}"
-        
+
         try:
             if self.args.mutex_give(self.args.buffer_mutex) != 0:
                 return False, "Failed to release mutex"
             return True, "Mutex released successfully"
         except (AttributeError, TypeError, ValueError, OverflowError, OSError, MemoryError) as e:
             return False, f"Exception during mutex release: {e}"
+
+    def get_var_list(self, indexes):
+        """
+        Get a list of variable addresses for the given indexes
+        Args:
+            indexes: List of integer indexes to get addresses for
+        Returns: (list, str) - (addresses, error_message)
+                addresses format: [address1, address2, ...] where each address is an int
+        """
+        if not self.is_valid:
+            return [], f"Invalid runtime args: {self.error_msg}"
+
+        if not indexes:
+            return [], "No indexes provided"
+
+        if not isinstance(indexes, (list, tuple)):
+            return [], "Indexes must be a list or tuple"
+
+        try:
+            # Convert Python list to C arrays
+            num_vars = len(indexes)
+            indexes_array = (ctypes.c_size_t * num_vars)(*indexes)
+            result_array = (ctypes.c_void_p * num_vars)()
+
+            # Call the C function
+            self.args.get_var_list(num_vars, indexes_array, result_array)
+
+            # Convert result back to Python list
+            addresses = []
+            for i in range(num_vars):
+                addr = result_array[i]
+                if addr is None:
+                    addresses.append(None)
+                else:
+                    # Convert void pointer to integer address
+                    addresses.append(ctypes.cast(addr, ctypes.c_void_p).value)
+
+            return addresses, "Success"
+
+        except (AttributeError, TypeError, ValueError, OverflowError, OSError, MemoryError) as e:
+            return [], f"Exception during get_var_list: {e}"
     
+    def get_var_size(self, index):
+        """
+        Get the size of a variable at the given index
+        Args:
+            index: Integer index of the variable
+        Returns: (int, str) - (size, error_message)
+        """
+        if not self.is_valid:
+            return 0, f"Invalid runtime args: {self.error_msg}"
+
+        try:
+            size = ctypes.c_size_t()
+            self.args.get_var_size(ctypes.c_size_t(index), ctypes.byref(size))
+            return size.value, "Success"
+
+        except (AttributeError, TypeError, ValueError, OverflowError, OSError, MemoryError) as e:
+            return 0, f"Exception during get_var_size: {e}"
+
     # Batch operations for optimized mutex usage
     def batch_read_values(self, operations):
         """
