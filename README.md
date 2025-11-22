@@ -1,15 +1,15 @@
 # OpenPLC Runtime v4
 
-OpenPLC Runtime v4 is an industrial automation execution environment that runs Programmable Logic Controller (PLC) programs on standard computing hardware. It provides a web-based interface for uploading, compiling, and controlling PLC programs with real-time execution capabilities.
+OpenPLC Runtime v4 is a headless industrial automation execution environment that runs Programmable Logic Controller (PLC) programs on standard computing hardware. It is designed to be controlled by the [OpenPLC Editor v4](https://github.com/Autonomy-Logic/openplc-editor) desktop application via a REST API.
 
 ## What is OpenPLC Runtime?
 
-OpenPLC Runtime v4 consists of two main components:
+OpenPLC Runtime v4 is a **headless service** with no web browser interface. It consists of two main components:
 
-1. **Web Server (Python/Flask)** - HTTPS interface on port 8443 for program management, monitoring, and debugging
+1. **REST API Server (Python/Flask)** - HTTPS interface on port 8443 for the OpenPLC Editor to upload programs, monitor compilation, and control execution
 2. **PLC Runtime Core (C/C++)** - Real-time execution engine with deterministic scan cycles
 
-The runtime executes programs created in [OpenPLC Editor v4](https://github.com/Autonomy-Logic/openplc-editor), supporting IEC 61131-3 programming languages (Ladder Logic, Structured Text, Function Block Diagram, etc.).
+The runtime executes programs created in the OpenPLC Editor, supporting IEC 61131-3 programming languages (Ladder Logic, Structured Text, Function Block Diagram, etc.). All interaction with the runtime happens through the OpenPLC Editor desktop application.
 
 ## Quick Start
 
@@ -23,11 +23,13 @@ docker pull ghcr.io/autonomy-logic/openplc-runtime:latest
 docker run -d \
   --name openplc-runtime \
   -p 8443:8443 \
+  --cap-add=SYS_NICE \
+  --cap-add=SYS_RESOURCE \
   -v openplc-runtime-data:/var/run/runtime \
   ghcr.io/autonomy-logic/openplc-runtime:latest
 ```
 
-Access the web interface at https://localhost:8443 (accept the self-signed certificate warning).
+The runtime will start and listen on port 8443 for connections from the OpenPLC Editor. **Do not open https://localhost:8443 in a browser** - there is no web interface. Instead, open the OpenPLC Editor desktop application and configure the runtime IP address and credentials to connect.
 
 **Supported Architectures:** amd64, arm64, armv7
 
@@ -48,7 +50,7 @@ sudo ./install.sh
 sudo ./start_openplc.sh
 ```
 
-Access the web interface at https://localhost:8443.
+The runtime will start and listen on port 8443. Connect to it from the OpenPLC Editor desktop application by configuring the runtime IP address and logging in from the Editor.
 
 **Supported Distributions:** Ubuntu, Debian, Fedora, CentOS, RHEL
 
@@ -60,46 +62,50 @@ Access the web interface at https://localhost:8443.
 
 ## How It Works
 
-1. **Create Program** - Design your PLC program in OpenPLC Editor v4
-2. **Generate ZIP** - Click "Generate program for OpenPLC Runtime v4" in the editor
-3. **Upload** - Upload the ZIP file via the web interface at https://localhost:8443
-4. **Compile** - Runtime automatically compiles the program (progress shown in web UI)
-5. **Run** - Start/stop PLC execution via the web interface or REST API
+1. **Create Program** - Design your PLC program in OpenPLC Editor v4 using Ladder Logic, FBD, ST, or other IEC 61131-3 languages
+2. **Compile in Editor** - The Editor compiles locally (JSON → XML → ST → C files) and packages sources into program.zip
+3. **Upload** - The Editor uploads the ZIP file to the runtime via HTTPS POST to `/api/upload-file` with JWT authentication
+4. **Compile on Runtime** - Runtime validates, extracts, and compiles the program using CMake (Editor polls `/api/compilation-status` for progress)
+5. **Control** - The Editor controls PLC execution via `/api/start-plc` and `/api/stop-plc` endpoints
+6. **Debug** - The Editor connects to the WebSocket debug interface at `/api/debug` for real-time variable monitoring
 
 The runtime compiles uploaded programs into shared libraries and loads them dynamically. The PLC core executes with real-time priority (SCHED_FIFO) for deterministic timing.
 
+**For detailed editor-runtime integration, see [docs/EDITOR_INTEGRATION.md](docs/EDITOR_INTEGRATION.md).**
+
 ## Key Features
 
-- **Web-Based Management** - Upload, compile, and control programs via HTTPS interface
-- **Real-Time Execution** - Deterministic scan cycles with configurable timing
-- **REST API** - Programmatic control via REST endpoints
-- **WebSocket Debug Interface** - Real-time variable inspection and modification
-- **Plugin System** - Extensible I/O drivers for various hardware
+- **Headless Service** - Controlled by OpenPLC Editor via REST API (no web browser interface)
+- **Real-Time Execution** - Deterministic scan cycles with SCHED_FIFO priority scheduling
+- **REST API** - Internal API for OpenPLC Editor communication on port 8443
+- **WebSocket Debug Interface** - Real-time variable inspection and forcing via Editor
+- **Plugin System** - Extensible I/O drivers for various hardware platforms
 - **Multi-Architecture** - Runs on x86_64, ARM64, and ARM32 platforms
-- **Docker Support** - Official multi-arch images available
-- **Security** - TLS encryption, JWT authentication, file upload validation
+- **Docker Support** - Official multi-arch container images
+- **Security** - TLS encryption, JWT authentication, comprehensive file upload validation
 
 ## Architecture
 
 OpenPLC Runtime v4 uses a dual-process architecture:
 
-- **Web Server Process** - Flask application managing the web interface, REST API, and WebSocket debug interface
-- **PLC Runtime Process** - C/C++ real-time engine executing PLC programs
+- **REST API Server Process** - Flask application managing the REST API and WebSocket debug interface for OpenPLC Editor communication
+- **PLC Runtime Process** - C/C++ real-time engine executing PLC programs with SCHED_FIFO priority
 
-The processes communicate via Unix domain sockets for command/control and log streaming.
+The processes communicate via Unix domain sockets (`/run/runtime/plc_runtime.socket`) for command/control and log streaming.
 
 **For detailed architecture information, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).**
 
 ## Documentation
 
 ### Getting Started
+- [Editor Integration](docs/EDITOR_INTEGRATION.md) - How OpenPLC Editor communicates with the runtime
 - [Docker Deployment](docs/DOCKER.md) - Container usage and configuration
 - [Compilation Flow](docs/COMPILATION_FLOW.md) - How programs are built and loaded
 - [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and solutions
 
 ### Advanced Topics
 - [Architecture](docs/ARCHITECTURE.md) - System design and components
-- [API Reference](docs/API.md) - REST endpoints and responses
+- [API Reference](docs/API.md) - Internal REST API for OpenPLC Editor
 - [Debug Protocol](docs/DEBUG_PROTOCOL.md) - WebSocket debug interface
 - [Security](docs/SECURITY.md) - Authentication, TLS, and file validation
 - [Plugin System](docs/PLUGIN_VENV_GUIDE.md) - Hardware I/O plugins
@@ -112,42 +118,43 @@ The processes communicate via Unix domain sockets for command/control and log st
 
 ## REST API
 
-The runtime provides a REST API for programmatic control:
+The runtime provides an internal REST API used by the OpenPLC Editor. The API is not intended for direct end-user interaction but can be used for advanced integration or diagnostics.
 
-```bash
-# Get PLC status
-curl -k https://localhost:8443/api?argument=status
+**Authentication Required:** All endpoints except `/api/create-user` (first user), `/api/login`, and `/api/get-users-info` require JWT authentication via `Authorization: Bearer <token>` header.
 
-# Start PLC
-curl -k https://localhost:8443/api?argument=start-plc
+**Key Endpoints:**
+- `POST /api/create-user` - Create user account
+- `POST /api/login` - Login and receive JWT token
+- `POST /api/upload-file` - Upload program ZIP (multipart/form-data)
+- `GET /api/compilation-status` - Get compilation status and logs
+- `GET /api/status` - Get PLC runtime status
+- `GET /api/start-plc` - Start PLC execution
+- `GET /api/stop-plc` - Stop PLC execution
+- `GET /api/runtime-logs` - Get runtime logs
 
-# Stop PLC
-curl -k https://localhost:8443/api?argument=stop-plc
-
-# Upload program
-curl -k -X POST -F "file=@program.zip" \
-  https://localhost:8443/api?argument=upload-file
-
-# Check compilation status
-curl -k https://localhost:8443/api?argument=compilation-status
-```
-
-**For complete API documentation, see [docs/API.md](docs/API.md).**
+**For complete API documentation with authentication flow and examples, see [docs/API.md](docs/API.md).**
 
 ## WebSocket Debug Interface
 
-Real-time debugging via WebSocket:
+The OpenPLC Editor uses a WebSocket interface for real-time debugging. Advanced integrators can also use this interface:
 
 ```javascript
-import io from 'socket.io-client';
+import { io } from 'socket.io-client';
 
 // Connect with JWT authentication
-const socket = io('wss://localhost:8443/api/debug', {
+const socket = io('https://localhost:8443', {
+  path: '/socket.io',
   transports: ['websocket'],
-  query: { token: jwt_token }
+  auth: { token: jwt_token },
+  rejectUnauthorized: false  // For self-signed certificates
 });
 
-// Send debug command
+// Listen for connection
+socket.on('connect', () => {
+  console.log('Connected to runtime');
+});
+
+// Send debug command (hex-encoded)
 socket.emit('debug_command', {
   command: '44 00 03 00 00 00 01 00 02'  // Get variables 0, 1, 2
 });
@@ -158,7 +165,7 @@ socket.on('debug_response', (response) => {
 });
 ```
 
-**For complete debug protocol documentation, see [docs/DEBUG_PROTOCOL.md](docs/DEBUG_PROTOCOL.md).**
+**For complete debug protocol documentation, see [docs/DEBUG_PROTOCOL.md](docs/DEBUG_PROTOCOL.md) and [webserver/DEBUG_WEBSOCKET.md](webserver/DEBUG_WEBSOCKET.md).**
 
 ## Docker Usage
 
@@ -316,7 +323,7 @@ The runtime automatically generates self-signed TLS certificates on first run:
 - Certificate: `webserver/certOPENPLC.pem`
 - Private key: `webserver/keyOPENPLC.pem`
 
-Browsers will show a certificate warning - this is normal for self-signed certificates. Click "Advanced" and proceed.
+The OpenPLC Editor handles self-signed certificates automatically. For advanced integrators using the API directly, you'll need to configure your HTTP client to accept self-signed certificates (e.g., `curl -k` or `rejectUnauthorized: false`).
 
 ### File Upload Security
 
@@ -329,9 +336,12 @@ Uploaded ZIP files undergo comprehensive security validation:
 
 ### Authentication
 
-- JWT tokens for WebSocket debug interface
+The runtime uses JWT-based authentication:
+- First user creation via `POST /api/create-user` (no auth required)
+- Login via `POST /api/login` returns JWT access token
+- All subsequent requests require `Authorization: Bearer <token>` header
 - Secrets stored in `/var/run/runtime/.env`
-- Password hashing with salt and pepper
+- Password hashing with PBKDF2-SHA256 (600,000 iterations), salt, and pepper
 
 **For complete security documentation, see [docs/SECURITY.md](docs/SECURITY.md).**
 
@@ -339,13 +349,13 @@ Uploaded ZIP files undergo comprehensive security validation:
 
 ### Common Issues
 
-**Cannot access web interface:**
+**Cannot connect from OpenPLC Editor:**
 ```bash
 # Check if runtime is running
 ps aux | grep python3 | grep webserver
 
-# Test connectivity
-curl -k https://localhost:8443/api?argument=ping
+# Check if port 8443 is listening
+sudo netstat -tlnp | grep 8443
 
 # Check firewall
 sudo ufw status
@@ -353,11 +363,11 @@ sudo ufw status
 
 **Compilation failed:**
 ```bash
-# Check compilation logs
-curl -k https://localhost:8443/api?argument=compilation-status
+# Check runtime logs
+sudo journalctl -u openplc-runtime -n 50
 
-# Verify ZIP file contains required files
-unzip -l program.zip
+# Check if runtime directory exists
+ls -la /run/runtime/
 ```
 
 **Permission errors:**
@@ -365,7 +375,7 @@ unzip -l program.zip
 # Ensure running with sudo
 sudo ./start_openplc.sh
 
-# Check socket directory
+# Check socket directory permissions
 ls -la /run/runtime/
 ```
 
