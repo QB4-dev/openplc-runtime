@@ -1,18 +1,50 @@
 """
-OpenPLC Python Plugin Configuration Package
+OpenPLC Python Plugin Shared Components Package
+
+This package provides shared components for OpenPLC Python plugins, including
+buffer access utilities, configuration handling, and type definitions.
 """
 
+# Core buffer access functionality (refactored modular architecture)
+from .safe_buffer_access_refactored import SafeBufferAccess
+
+# Legacy compatibility - import from original implementation if needed
+from .python_plugin_types import (
+    PluginRuntimeArgs,
+    PluginStructureValidator,
+    safe_extract_runtime_args_from_capsule
+)
+
+# Configuration models
 from .plugin_config_decode.plugin_config_contact import PluginConfigContract, PluginConfigError
 from .plugin_config_decode.modbus_master_config_model import ModbusIoPointConfig, ModbusMasterConfig
 
+# Component interfaces (for advanced users who want to extend the system)
+from .component_interfaces import (
+    IBufferType, IMutexManager, IBufferValidator, IBufferAccessor,
+    IBatchProcessor, IDebugUtils, IConfigHandler, ISafeBufferAccess
+)
+
 __all__ = [
-    # abstract contract for each protocol config model
+    # Core buffer access (refactored)
+    'SafeBufferAccess',
+
+    # Legacy type definitions (maintained for compatibility)
+    'PluginRuntimeArgs',
+    'PluginStructureValidator',
+    'safe_extract_runtime_args_from_capsule',
+
+    # Configuration models
     'PluginConfigContract',
-    # top level config instance
-    'PluginConfigError', 
-    # concrete protocol config models
+    'PluginConfigError',
     'ModbusIoPointConfig',
     'ModbusMasterConfig',
+
+    # Component interfaces (for extension)
+    'IBufferType', 'IMutexManager', 'IBufferValidator', 'IBufferAccessor',
+    'IBatchProcessor', 'IDebugUtils', 'IConfigHandler', 'ISafeBufferAccess',
+
+    # Future extensions
     # 'EthercatConfig',
     # 'EthercatIoPointConfig',
 ]
