@@ -1,0 +1,72 @@
+[
+    {
+        "name": "opcua_server",
+        "protocol": "OPC-UA",
+        "config": {
+            "endpoint": "opc.tcp://0.0.0.0:4840/freeopcua/server/",
+            "server_name": "OpenPLC OPC-UA Server",
+            "security_policy": "None",
+            "security_mode": "None",
+            "certificate": "",
+            "private_key": "",
+            "cycle_time_ms": 100,
+            "namespace": "OpenPLC",
+            "variables": [
+                {
+                    "node_name": "temperature",
+                    "datatype": "Float",
+                    "index": 0,
+                    "access": "readwrite"
+                },
+                {
+                    "node_name": "status",
+                    "datatype": "Bool",
+                    "index": 1,
+                    "access": "readonly"
+                },
+                {
+                    "node_name": "person",
+                    "type": "STRUCT",
+                    "members": [
+                        {
+                            "name": "name",
+                            "datatype": "String",
+                            "index": 2,
+                            "access": "readwrite"
+                        },
+                        {
+                            "name": "age",
+                            "datatype": "Int32",
+                            "index": 3,
+                            "access": "readwrite"
+                        }
+                    ]
+                },
+                {
+                    "node_name": "sensor_values",
+                    "type": "ARRAY",
+                    "members": [
+                        {
+                            "name": "[0]",
+                            "datatype": "Float",
+                            "index": 4,
+                            "access": "readwrite"
+                        },
+                        {
+                            "name": "[1]",
+                            "datatype": "Float",
+                            "index": 5,
+                            "access": "readwrite"
+                        },
+                        {
+                            "name": "[2]",
+                            "datatype": "Float",
+                            "index": 6,
+                            "access": "readwrite"
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+]
