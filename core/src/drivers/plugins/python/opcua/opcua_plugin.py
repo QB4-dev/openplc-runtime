@@ -3,6 +3,8 @@ import os
 import asyncio
 import threading
 import time
+import traceback
+import struct
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 
@@ -13,7 +15,7 @@ from asyncua.common.node import Node
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 # Import the correct type definitions
-from shared.python_plugin_types import (
+from shared import (
     PluginRuntimeArgs,
     safe_extract_runtime_args_from_capsule,
     SafeBufferAccess,
@@ -200,7 +202,6 @@ class OpcuaServer:
 
         except Exception as e:
             print(f"(FAIL) Failed to create struct variable '{variable.node_name}': {e}")
-            import traceback
             traceback.print_exc()
 
     async def _create_array_variable(self, parent_node: Node, variable: Any) -> None:
@@ -249,7 +250,6 @@ class OpcuaServer:
 
         except Exception as e:
             print(f"(FAIL) Failed to create array variable '{variable.node_name}': {e}")
-            import traceback
             traceback.print_exc()
 
     def _map_iec_to_opcua_type(self, iec_type: str) -> ua.VariantType:
@@ -322,7 +322,6 @@ class OpcuaServer:
             # Float values are stored as integers in debug variables
             # Convert back to float if it's an integer representation
             if isinstance(value, int):
-                import struct
                 try:
                     return struct.unpack('f', struct.pack('I', value))[0]
                 except:
@@ -367,7 +366,6 @@ class OpcuaServer:
         # May need conversion for certain types
         if datatype == "Float" and isinstance(value, float):
             # Convert float to int representation for storage
-            import struct
             try:
                 return struct.unpack('I', struct.pack('f', value))[0]
             except:
@@ -498,7 +496,6 @@ def init(args_capsule):
 
     except Exception as e:
         print(f"(FAIL) Error during initialization: {e}")
-        import traceback
         traceback.print_exc()
         return False
 
@@ -529,7 +526,6 @@ def start_loop():
 
     except Exception as e:
         print(f"(FAIL) Error starting main loop: {e}")
-        import traceback
         traceback.print_exc()
         return False
 
@@ -564,7 +560,6 @@ def stop_loop():
 
     except Exception as e:
         print(f"(FAIL) Error stopping main loop: {e}")
-        import traceback
         traceback.print_exc()
         return False
 
@@ -594,7 +589,6 @@ def cleanup():
 
     except Exception as e:
         print(f"(FAIL) Error during cleanup: {e}")
-        import traceback
         traceback.print_exc()
         return False
 
