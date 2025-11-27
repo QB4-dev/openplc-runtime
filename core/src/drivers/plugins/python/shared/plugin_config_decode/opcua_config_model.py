@@ -12,8 +12,93 @@ AccessMode = Literal["readwrite", "readonly"]
 VariableType = Literal["STRUCT", "ARRAY"]
 
 @dataclass
+class OpcuaVariableDefinition:
+    """Represents a variable definition that can be simple or complex (recursive)."""
+    name: str
+    datatype: Optional[str] = None
+    index: Optional[int] = None
+    access: Optional[AccessMode] = None
+    type: Optional[VariableType] = None
+    members: Optional[List['OpcuaVariableDefinition']] = None
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'OpcuaVariableDefinition':
+        """Creates an OpcuaVariableDefinition instance from a dictionary (recursive)."""
+        # Check if it's a complex variable (STRUCT or ARRAY)
+        var_type = data.get("type")
+        if var_type in ["STRUCT", "ARRAY"]:
+            # Complex variable - requires name
+            try:
+                name = data["name"]
+            except KeyError as e:
+                raise ValueError(f"Missing required field 'name' in complex OPC-UA variable definition: {e}")
+
+            # Parse members recursively
+            members_data = data.get("members", [])
+            members = [cls.from_dict(member) for member in members_data]
+            return cls(
+                name=name,
+                type=var_type,
+                members=members
+            )
+        else:
+            # Simple variable - may not have name (for root level variables)
+            name = data.get("name", "")
+
+            try:
+                datatype = data["datatype"]
+                index = data["index"]
+                access = data["access"]
+            except KeyError as e:
+                raise ValueError(f"Missing required field in simple OPC-UA variable: {e}")
+
+            if access not in ["readwrite", "readonly"]:
+                raise ValueError(f"Invalid access mode: {access}. Must be 'readwrite' or 'readonly'")
+
+            return cls(
+                name=name,
+                datatype=datatype,
+                index=index,
+                access=access
+            )
+
+    def collect_leaf_variables(self) -> List['OpcuaVariableDefinition']:
+        """Recursively collect all leaf (simple) variables from this definition."""
+        leaves = []
+        if self.type in ["STRUCT", "ARRAY"] and self.members:
+            for member in self.members:
+                leaves.extend(member.collect_leaf_variables())
+        else:
+            leaves.append(self)
+        return leaves
+
+    def validate(self, path: str = "") -> None:
+        """Validate this variable definition recursively."""
+        current_path = f"{path}.{self.name}" if path else self.name
+
+        if self.type in ["STRUCT", "ARRAY"]:
+            if not self.members:
+                raise ValueError(f"Complex variable '{current_path}' has no members")
+            if self.datatype is not None or self.index is not None or self.access is not None:
+                raise ValueError(f"Complex variable '{current_path}' should not have datatype/index/access at root level")
+
+            # Validate members recursively
+            for member in self.members:
+                member.validate(current_path)
+        else:
+            # Simple variable validation
+            if self.datatype is None:
+                raise ValueError(f"Simple variable '{current_path}' missing datatype")
+            if self.index is None:
+                raise ValueError(f"Simple variable '{current_path}' missing index")
+            if self.access is None:
+                raise ValueError(f"Simple variable '{current_path}' missing access")
+            if self.members is not None:
+                raise ValueError(f"Simple variable '{current_path}' should not have members")
+
+@dataclass
 class OpcuaVariableMember:
-    """Represents a member of a STRUCT or ARRAY variable."""
+    """Legacy class - represents a member of a STRUCT or ARRAY variable."""
     name: str
     datatype: str
     index: int
@@ -37,13 +122,9 @@ class OpcuaVariableMember:
 
 @dataclass
 class OpcuaVariable:
-    """Represents an OPC-UA variable, which can be simple or complex (STRUCT/ARRAY)."""
+    """Represents an OPC-UA variable with recursive structure support."""
     node_name: str
-    datatype: Optional[str] = None
-    index: Optional[int] = None
-    access: Optional[AccessMode] = None
-    type: Optional[VariableType] = None
-    members: Optional[List[OpcuaVariableMember]] = None
+    definition: OpcuaVariableDefinition
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'OpcuaVariable':
@@ -51,37 +132,33 @@ class OpcuaVariable:
         try:
             node_name = data["node_name"]
         except KeyError as e:
-            raise ValueError(f"Missing required field in OPC-UA variable: {e}")
+            raise ValueError(f"Missing required field 'node_name' in OPC-UA variable: {e}")
 
-        # Check if it's a complex variable (STRUCT or ARRAY)
-        var_type = data.get("type")
-        if var_type in ["STRUCT", "ARRAY"]:
-            # Complex variable
-            members_data = data.get("members", [])
-            members = [OpcuaVariableMember.from_dict(member) for member in members_data]
-            return cls(
-                node_name=node_name,
-                type=var_type,
-                members=members
-            )
-        else:
-            # Simple variable
-            try:
-                datatype = data["datatype"]
-                index = data["index"]
-                access = data["access"]
-            except KeyError as e:
-                raise ValueError(f"Missing required field in simple OPC-UA variable: {e}")
+        # Create the variable definition (handles both simple and complex cases recursively)
+        # Copy data and ensure 'name' field exists for complex variables
+        definition_data = data.copy()
+        definition_data.pop("node_name", None)
 
-            if access not in ["readwrite", "readonly"]:
-                raise ValueError(f"Invalid access mode: {access}. Must be 'readwrite' or 'readonly'")
+        # For complex variables, we need a 'name' field - use an empty string since root level doesn't need names
+        # The actual node name is stored separately in OpcuaVariable.node_name
+        if "type" in definition_data and definition_data["type"] in ["STRUCT", "ARRAY"]:
+            # For complex root variables, add a dummy name (not used in node creation)
+            definition_data["name"] = ""
 
-            return cls(
-                node_name=node_name,
-                datatype=datatype,
-                index=index,
-                access=access
-            )
+        definition = OpcuaVariableDefinition.from_dict(definition_data)
+
+        return cls(
+            node_name=node_name,
+            definition=definition
+        )
+
+    def collect_leaf_variables(self) -> List[OpcuaVariableDefinition]:
+        """Collect all leaf (simple) variables recursively."""
+        return self.definition.collect_leaf_variables()
+
+    def validate(self) -> None:
+        """Validate the variable definition."""
+        self.definition.validate(self.node_name)
 
 @dataclass
 class OpcuaConfig:
@@ -197,13 +274,11 @@ class OpcuaMasterConfig(PluginConfigContract):
             if len(var_names) != len(set(var_names)):
                 raise ValueError(f"Duplicate variable names found in plugin '{plugin.name}'")
 
-            # Check for duplicate indices within a plugin
+            # Check for duplicate indices within a plugin (collect from all leaf variables)
             all_indices = []
             for var in config.variables:
-                if var.index is not None:
-                    all_indices.append(var.index)
-                if var.members:
-                    all_indices.extend([member.index for member in var.members])
+                leaf_vars = var.collect_leaf_variables()
+                all_indices.extend([leaf.index for leaf in leaf_vars if leaf.index is not None])
 
             if len(all_indices) != len(set(all_indices)):
                 raise ValueError(f"Duplicate indices found in plugin '{plugin.name}'")

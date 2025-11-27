@@ -91,28 +91,15 @@ class OpcuaServer:
             # Get the Objects folder
             objects = self.server.get_objects_node()
 
-            # Create variables
+            # Create variables recursively
             for variable in self.config.variables:
                 try:
-                    # Debug: Print variable info
                     print(f"Processing variable: {variable.node_name}")
-                    if hasattr(variable, 'type') and variable.type:
-                        print(f"  Type: {variable.type}")
-                        if hasattr(variable, 'members'):
-                            print(f"  Members count: {len(variable.members)}")
-                    elif hasattr(variable, 'datatype'):
-                        print(f"  Simple type: {variable.datatype}")
-                    
-                    # Create nodes based on type
-                    if hasattr(variable, 'type') and variable.type == "STRUCT":
-                        await self._create_struct_variable(objects, variable)
-                    elif hasattr(variable, 'type') and variable.type == "ARRAY":
-                        await self._create_array_variable(objects, variable)
-                    else:
-                        await self._create_simple_variable(objects, variable)
-                        
+                    await self._create_variable_recursive(objects, variable.definition, variable.node_name)
+
                 except Exception as e:
                     print(f"(FAIL) Error processing variable {variable.node_name}: {e}")
+                    traceback.print_exc()
 
             print(f"(PASS) Created {len(self.variable_nodes)} variable nodes")
             return True
@@ -121,136 +108,66 @@ class OpcuaServer:
             print(f"(FAIL) Failed to create variable nodes: {e}")
             return False
 
-    async def _create_simple_variable(self, parent_node: Node, variable: Any) -> None:
-        """Create a simple OPC-UA variable node."""
+    async def _create_variable_recursive(self, parent_node: Node, var_def: Any, node_name: str, path: str = "") -> None:
+        """Create OPC-UA nodes recursively for complex variable definitions."""
         try:
-            # Map IEC datatype to OPC-UA datatype
-            opcua_type = self._map_iec_to_opcua_type(variable.datatype)
+            current_path = f"{path}.{node_name}" if path else node_name
 
-            # Create the node
-            node = await parent_node.add_variable(
-                self.namespace_idx,
-                variable.node_name,
-                ua.Variant(0, opcua_type),
-                datatype=opcua_type
-            )
+            if var_def.type in ["STRUCT", "ARRAY"]:
+                # Create parent object for complex types
+                print(f"Creating {var_def.type} node: {current_path}")
+                complex_obj = await parent_node.add_object(self.namespace_idx, node_name)
 
-            # Set access level based on configuration
-            access_level = ua.AccessLevel.CurrentRead
-            if variable.access == "readwrite":
-                access_level |= ua.AccessLevel.CurrentWrite
+                # Recursively create member nodes
+                if var_def.members:
+                    print(f"  Creating {len(var_def.members)} members:")
+                    for member in var_def.members:
+                        await self._create_variable_recursive(complex_obj, member, member.name, current_path)
 
-            await node.write_attribute(ua.AttributeIds.AccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
+            else:
+                # Create simple variable node
+                print(f"  Creating simple variable: {current_path} (type: {var_def.datatype}, index: {var_def.index})")
+                opcua_type = self._map_iec_to_opcua_type(var_def.datatype)
 
-            # Add write callback for readwrite variables
-            if variable.access == "readwrite":
-                await self._add_write_callback(node, variable.index)
-
-            # Store node mapping
-            var_node = VariableNode(
-                node=node,
-                debug_var_index=variable.index,
-                datatype=variable.datatype,
-                access_mode=variable.access
-            )
-            self.variable_nodes[variable.index] = var_node
-
-        except Exception as e:
-            print(f"(FAIL) Failed to create simple variable '{variable.node_name}': {e}")
-
-    async def _create_struct_variable(self, parent_node: Node, variable: Any) -> None:
-        """Create an OPC-UA object node with member variables for STRUCT."""
-        try:
-            print(f"Creating STRUCT variable: {variable.node_name}")
-            
-            # Create parent object for the struct
-            struct_obj = await parent_node.add_object(self.namespace_idx, variable.node_name)
-
-            # Create member variables
-            print(f"  Creating {len(variable.members)} members:")
-            for member in variable.members:
-                print(f"    Member: {member.name}, type: {member.datatype}, index: {member.index}")
-                opcua_type = self._map_iec_to_opcua_type(member.datatype)
-
-                member_node = await struct_obj.add_variable(
+                # Create the node
+                node = await parent_node.add_variable(
                     self.namespace_idx,
-                    member.name,
+                    node_name,
                     ua.Variant(0, opcua_type),
                     datatype=opcua_type
                 )
 
-                # Set access level
+                # Set access level based on configuration
                 access_level = ua.AccessLevel.CurrentRead
-                if member.access == "readwrite":
+                if var_def.access == "readwrite":
                     access_level |= ua.AccessLevel.CurrentWrite
 
-                await member_node.write_attribute(ua.AttributeIds.AccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
+                await node.write_attribute(ua.AttributeIds.AccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
 
                 # Add write callback for readwrite variables
-                if member.access == "readwrite":
-                    await self._add_write_callback(member_node, member.index)
+                if var_def.access == "readwrite":
+                    await self._add_write_callback(node, var_def.index)
 
                 # Store node mapping
                 var_node = VariableNode(
-                    node=member_node,
-                    debug_var_index=member.index,
-                    datatype=member.datatype,
-                    access_mode=member.access
+                    node=node,
+                    debug_var_index=var_def.index,
+                    datatype=var_def.datatype,
+                    access_mode=var_def.access,
+                    is_array_element="[" in node_name and "]" in node_name
                 )
-                self.variable_nodes[member.index] = var_node
-                print(f"    ✓ Created member: {member.name}")
+                if var_node.is_array_element:
+                    var_node.array_index = int(node_name.strip("[]")) if node_name.startswith("[") else 0
+
+                self.variable_nodes[var_def.index] = var_node
+                print(f"    ✓ Created variable: {current_path}")
 
         except Exception as e:
-            print(f"(FAIL) Failed to create struct variable '{variable.node_name}': {e}")
+            print(f"(FAIL) Failed to create variable node '{current_path}': {e}")
             traceback.print_exc()
+            raise
 
-    async def _create_array_variable(self, parent_node: Node, variable: Any) -> None:
-        """Create OPC-UA variable nodes for ARRAY elements."""
-        try:
-            print(f"Creating ARRAY variable: {variable.node_name}")
-            
-            # Create parent object for the array
-            array_obj = await parent_node.add_object(self.namespace_idx, variable.node_name)
 
-            # Create array element variables
-            print(f"  Creating {len(variable.members)} array elements:")
-            for member in variable.members:
-                print(f"    Element: {member.name}, type: {member.datatype}, index: {member.index}")
-                opcua_type = self._map_iec_to_opcua_type(member.datatype)
-
-                element_node = await array_obj.add_variable(
-                    self.namespace_idx,
-                    member.name,  # This will be "[0]", "[1]", etc.
-                    ua.Variant(0, opcua_type),
-                    datatype=opcua_type
-                )
-
-                # Set access level
-                access_level = ua.AccessLevel.CurrentRead
-                if member.access == "readwrite":
-                    access_level |= ua.AccessLevel.CurrentWrite
-
-                await element_node.write_attribute(ua.AttributeIds.AccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
-
-                # Add write callback for readwrite variables
-                if member.access == "readwrite":
-                    await self._add_write_callback(element_node, member.index)
-
-                # Store node mapping
-                var_node = VariableNode(
-                    node=element_node,
-                    debug_var_index=member.index,
-                    datatype=member.datatype,
-                    access_mode=member.access,
-                    is_array_element=True,
-                    array_index=int(member.name.strip("[]")) if member.name.startswith("[") else 0
-                )
-                self.variable_nodes[member.index] = var_node
-                print(f"    ✓ Created element: {member.name}")
-
-        except Exception as e:
-            print(f"(FAIL) Failed to create array variable '{variable.node_name}': {e}")
-            traceback.print_exc()
 
     def _map_iec_to_opcua_type(self, iec_type: str) -> ua.VariantType:
         """Map IEC datatype to OPC-UA VariantType."""
