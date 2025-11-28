@@ -4,10 +4,7 @@ import asyncio
 import threading
 import time
 import traceback
-import struct
-import ctypes
 from typing import Optional, Dict, Any, List
-from dataclasses import dataclass
 
 from asyncua import Server, ua
 from asyncua.common.node import Node
@@ -25,6 +22,28 @@ from shared import (
 # Import the configuration model
 from shared.plugin_config_decode.opcua_config_model import OpcuaMasterConfig
 
+# Import local modules
+try:
+    # Try relative imports first (when used as package)
+    from .opcua_types import VariableNode, VariableMetadata
+    from .opcua_utils import (
+        map_plc_to_opcua_type,
+        convert_value_for_opcua,
+        convert_value_for_plc,
+        infer_var_type,
+    )
+    from .opcua_memory import read_memory_direct, initialize_variable_cache
+except ImportError:
+    # Fallback to absolute imports (when run standalone)
+    from opcua_types import VariableNode, VariableMetadata
+    from opcua_utils import (
+        map_plc_to_opcua_type,
+        convert_value_for_opcua,
+        convert_value_for_plc,
+        infer_var_type,
+    )
+    from opcua_memory import read_memory_direct, initialize_variable_cache
+
 # Global variables for plugin lifecycle and configuration
 runtime_args = None
 opcua_config: OpcuaMasterConfig = None
@@ -32,26 +51,6 @@ safe_buffer_accessor: SafeBufferAccess = None
 opcua_server = None
 server_thread: Optional[threading.Thread] = None
 stop_event = threading.Event()
-
-
-@dataclass
-class VariableNode:
-    """Represents an OPC-UA node mapped to a PLC debug variable."""
-    node: Node
-    debug_var_index: int
-    datatype: str
-    access_mode: str
-    is_array_element: bool = False
-    array_index: Optional[int] = None
-
-
-@dataclass
-class VariableMetadata:
-    """Metadata cache for direct memory access"""
-    index: int
-    address: int
-    size: int
-    inferred_type: str
 
 
 class OpcuaServer:
@@ -115,7 +114,9 @@ class OpcuaServer:
 
             # Initialize variable metadata cache for direct memory access
             var_indices = list(self.variable_nodes.keys())
-            await self._initialize_variable_cache(var_indices)
+            self.variable_metadata = initialize_variable_cache(self.sba, var_indices)
+            if not self.variable_metadata:
+                self._direct_memory_access_enabled = False
 
             print(f"(PASS) Created {len(self.variable_nodes)} variable nodes")
             return True
@@ -143,7 +144,7 @@ class OpcuaServer:
             else:
                 # Create simple variable node
                 print(f"  Creating simple variable: {current_path} (type: {var_def.datatype}, index: {var_def.index})")
-                opcua_type = self._map_plc_to_opcua_type(var_def.datatype)
+                opcua_type = map_plc_to_opcua_type(var_def.datatype)
 
                 # Create the node
                 node = await parent_node.add_variable(
@@ -185,21 +186,7 @@ class OpcuaServer:
 
 
 
-    def _map_plc_to_opcua_type(self, plc_type: str) -> ua.VariantType:
-        """Map plc datatype to OPC-UA VariantType."""
-        type_mapping = {
-            "Bool": ua.VariantType.Boolean,
-            "Byte": ua.VariantType.Byte,
-            "Int": ua.VariantType.UInt16,
-            "Int32": ua.VariantType.UInt32,  # Added Int32 mapping
-            "Dint": ua.VariantType.UInt32,
-            "Lint": ua.VariantType.UInt64,
-            "Float": ua.VariantType.Float,
-            "String": ua.VariantType.String,
-        }
-        mapped_type = type_mapping.get(plc_type, ua.VariantType.Variant)
-        print(f"    Mapping {plc_type} -> {mapped_type}")
-        return mapped_type
+
 
     async def update_variables_from_plc(self) -> None:
         """Optimized update loop with metadata cache"""
@@ -222,7 +209,7 @@ class OpcuaServer:
         for var_index, metadata in self.variable_metadata.items():
             try:
                 # Direct memory access - no C calls!
-                value = self._read_memory_direct(metadata.address, metadata.size)
+                value = read_memory_direct(metadata.address, metadata.size)
 
                 var_node = self.variable_nodes[var_index]
                 await self._update_opcua_node(var_node, value)
@@ -255,38 +242,36 @@ class OpcuaServer:
         """Update an OPC-UA node with a new value."""
         try:
             # Convert value if necessary for OPC-UA format
-            opcua_value = self._convert_value_for_opcua(var_node.datatype, value)
+            opcua_value = convert_value_for_opcua(var_node.datatype, value)
             await var_node.node.write_value(ua.Variant(opcua_value))
         except Exception as e:
             print(f"(FAIL) Failed to update OPC-UA node for debug variable {var_node.debug_var_index}: {e}")
 
+    def _map_plc_to_opcua_type(self, plc_type: str) -> ua.VariantType:
+        """Map plc datatype to OPC-UA VariantType."""
+        return map_plc_to_opcua_type(plc_type)
+
     def _convert_value_for_opcua(self, datatype: str, value: Any) -> Any:
         """Convert PLC debug variable value to OPC-UA compatible format."""
-        # The debug utils return raw integer values based on variable size
-        # Convert to appropriate OPC-UA types based on config datatype
-        if datatype == "Bool":
-            return bool(value)
-        elif datatype == "Byte":
-            return int(value)
-        elif datatype == "Int":
-            return int(value)
-        elif datatype == "Dint":
-            return int(value)
-        elif datatype == "Lint":
-            return int(value)
-        elif datatype == "Float":
-            # Float values are stored as integers in debug variables
-            # Convert back to float if it's an integer representation
-            if isinstance(value, int):
-                try:
-                    return struct.unpack('f', struct.pack('I', value))[0]
-                except:
-                    return float(value)
-            return float(value)
-        elif datatype == "String":
-            return str(value)
-        else:
-            return value
+        return convert_value_for_opcua(datatype, value)
+
+    def _convert_value_for_plc(self, datatype: str, value: Any) -> Any:
+        """Convert OPC-UA value to PLC debug variable format."""
+        return convert_value_for_plc(datatype, value)
+
+    def _infer_var_type(self, size: int) -> str:
+        """Infer variable type from size."""
+        return infer_var_type(size)
+
+    def _read_memory_direct(self, address: int, size: int) -> Any:
+        """Read value directly from memory using cached address."""
+        return read_memory_direct(address, size)
+
+    async def _initialize_variable_cache(self, indices: List[int]) -> None:
+        """Initialize metadata cache for direct memory access."""
+        self.variable_metadata = initialize_variable_cache(self.sba, indices)
+        if not self.variable_metadata:
+            self._direct_memory_access_enabled = False
 
     async def _add_write_callback(self, node: Node, var_index: int) -> None:
         """Add a write callback to an OPC-UA node for writing back to PLC."""
@@ -298,7 +283,7 @@ class OpcuaServer:
                     opcua_value = val.Value
 
                     # Convert OPC-UA value to PLC format if needed
-                    plc_value = self._convert_value_for_plc(self.variable_nodes[var_index].datatype, opcua_value)
+                    plc_value = convert_value_for_plc(self.variable_nodes[var_index].datatype, opcua_value)
 
                     # Write to PLC debug variable
                     success, msg = self.sba.set_var_value(var_index, plc_value)
@@ -315,87 +300,6 @@ class OpcuaServer:
 
         except Exception as e:
             print(f"(FAIL) Failed to add write callback for variable {var_index}: {e}")
-
-    def _convert_value_for_plc(self, datatype: str, value: Any) -> Any:
-        """Convert OPC-UA value to PLC debug variable format."""
-        # For most types, the value can be used directly
-        # May need conversion for certain types
-        if datatype == "Float" and isinstance(value, float):
-            # Convert float to int representation for storage
-            try:
-                return struct.unpack('I', struct.pack('f', value))[0]
-            except:
-                return int(value)
-        return value
-
-    async def _initialize_variable_cache(self, indices: List[int]) -> None:
-        """Initialize metadata cache for direct memory access"""
-        try:
-            # Batch: get addresses
-            addresses, addr_msg = self.sba.get_var_list(indices)
-            if addr_msg != "Success":
-                print(f"(WARN) Failed to cache addresses: {addr_msg}")
-                self._direct_memory_access_enabled = False
-                return
-
-            # Batch: get sizes
-            sizes, size_msg = self.sba.get_var_sizes_batch(indices)
-            if size_msg != "Success":
-                print(f"(WARN) Failed to cache sizes: {size_msg}")
-                self._direct_memory_access_enabled = False
-                return
-
-            # Create cache
-            for i, var_index in enumerate(indices):
-                if addresses[i] is not None and sizes[i] > 0:
-                    metadata = VariableMetadata(
-                        index=var_index,
-                        address=addresses[i],
-                        size=sizes[i],
-                        inferred_type=self._infer_var_type(sizes[i])
-                    )
-                    self.variable_metadata[var_index] = metadata
-
-            print(f"(PASS) Cached metadata for {len(self.variable_metadata)} variables")
-
-        except Exception as e:
-            print(f"(WARN) Failed to initialize variable cache: {e}")
-            self._direct_memory_access_enabled = False
-
-    def _infer_var_type(self, size: int) -> str:
-        """Infer variable type from size"""
-        if size == 1:
-            return "BOOL_OR_SINT"
-        elif size == 2:
-            return "UINT16"
-        elif size == 4:
-            return "UINT32_OR_TIME"
-        elif size == 8:
-            return "UINT64_OR_TIME"
-        else:
-            return "UNKNOWN"
-
-    def _read_memory_direct(self, address: int, size: int) -> Any:
-        """Read value directly from memory using cached address"""
-
-        try:
-            if size == 1:
-                ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint8))
-                return ptr.contents.value
-            elif size == 2:
-                ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint16))
-                return ptr.contents.value
-            elif size == 4:
-                ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint32))
-                return ptr.contents.value
-            elif size == 8:
-                ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint64))
-                return ptr.contents.value
-            else:
-                raise ValueError(f"Unsupported variable size: {size}")
-
-        except Exception as e:
-            raise RuntimeError(f"Memory access error: {e}")
 
     async def start_server(self) -> bool:
         """Start the OPC-UA server."""
