@@ -127,7 +127,7 @@ class OpcuaServer:
             else:
                 # Create simple variable node
                 print(f"  Creating simple variable: {current_path} (type: {var_def.datatype}, index: {var_def.index})")
-                opcua_type = self._map_iec_to_opcua_type(var_def.datatype)
+                opcua_type = self._map_plc_to_opcua_type(var_def.datatype)
 
                 # Create the node
                 node = await parent_node.add_variable(
@@ -169,8 +169,8 @@ class OpcuaServer:
 
 
 
-    def _map_iec_to_opcua_type(self, iec_type: str) -> ua.VariantType:
-        """Map IEC datatype to OPC-UA VariantType."""
+    def _map_plc_to_opcua_type(self, plc_type: str) -> ua.VariantType:
+        """Map plc datatype to OPC-UA VariantType."""
         type_mapping = {
             "Bool": ua.VariantType.Boolean,
             "Byte": ua.VariantType.Byte,
@@ -181,8 +181,8 @@ class OpcuaServer:
             "Float": ua.VariantType.Float,
             "String": ua.VariantType.String,
         }
-        mapped_type = type_mapping.get(iec_type, ua.VariantType.Variant)
-        print(f"    Mapping {iec_type} -> {mapped_type}")
+        mapped_type = type_mapping.get(plc_type, ua.VariantType.Variant)
+        print(f"    Mapping {plc_type} -> {mapped_type}")
         return mapped_type
 
     async def update_variables_from_plc(self) -> None:
