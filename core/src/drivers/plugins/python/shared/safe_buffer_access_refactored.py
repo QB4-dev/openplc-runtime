@@ -237,6 +237,18 @@ class SafeBufferAccess(ISafeBufferAccess):
         """Get variable information."""
         return self.debug_utils.get_var_info(index)
 
+    def get_var_sizes_batch(self, indexes: List[int]) -> Tuple[List[int], str]:
+        """Get sizes for multiple variables in batch."""
+        return self.debug_utils.get_var_sizes_batch(indexes)
+
+    def get_var_values_batch(self, indexes: List[int]) -> Tuple[List[Tuple[Any, str]], str]:
+        """Read multiple variable values in batch."""
+        return self.debug_utils.get_var_values_batch(indexes)
+
+    def set_var_values_batch(self, index_value_pairs: List[Tuple[int, Any]]) -> Tuple[List[Tuple[bool, str]], str]:
+        """Write multiple variable values in batch."""
+        return self.debug_utils.set_var_values_batch(index_value_pairs)
+
     # ============================================================================
     # Configuration Operations
     # ============================================================================

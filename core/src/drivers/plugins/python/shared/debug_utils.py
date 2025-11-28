@@ -5,6 +5,7 @@ This module provides debug and variable access utilities.
 It handles variable listing, size queries, value reading/writing, and other debug operations.
 """
 
+import ctypes
 from typing import List, Tuple, Dict, Any, Optional
 try:
     # Try relative imports first (when used as package)
@@ -50,7 +51,6 @@ class DebugUtils(IDebugUtils):
 
         try:
             # Convert Python list to C arrays
-            import ctypes
             num_vars = len(indexes)
             indexes_array = (ctypes.c_size_t * num_vars)(*indexes)
             result_array = (ctypes.c_void_p * num_vars)()
@@ -84,7 +84,6 @@ class DebugUtils(IDebugUtils):
             Tuple[int, str]: (size, error_message)
         """
         try:
-            import ctypes
             size = self.args.get_var_size(ctypes.c_size_t(index))
             return size, "Success"
 
@@ -102,7 +101,6 @@ class DebugUtils(IDebugUtils):
             Tuple[Any, str]: (value, error_message)
         """
         try:
-            import ctypes
             # Get variable address and size
             addresses, addr_err = self.get_var_list([index])
             if not addresses or addresses[0] is None:
@@ -157,7 +155,6 @@ class DebugUtils(IDebugUtils):
             Tuple[bool, str]: (success, error_message)
         """
         try:
-            import ctypes
             # Get variable address and size
             addresses, addr_err = self.get_var_list([index])
             if not addresses or addresses[0] is None:
@@ -265,6 +262,211 @@ class DebugUtils(IDebugUtils):
 
         except (AttributeError, TypeError, ValueError, OSError, MemoryError) as e:
             return {}, f"Exception during get_var_info: {e}"
+
+    def get_var_sizes_batch(self, indexes: List[int]) -> Tuple[List[int], str]:
+        """
+        Get sizes for multiple variables in a single batch operation.
+
+        Args:
+            indexes: List of integer indexes to get sizes for
+
+        Returns:
+            Tuple[List[int], str]: (sizes, error_message)
+                sizes format: [size1, size2, ...] where each size is an int
+        """
+        if not indexes:
+            return [], "No indexes provided"
+
+        if not isinstance(indexes, (list, tuple)):
+            return [], "Indexes must be a list or tuple"
+
+        try:
+            sizes = []
+
+            # Call get_var_size for each index (could be optimized further if C API supports batch)
+            for index in indexes:
+                size, msg = self.get_var_size(index)
+                if msg == "Success":
+                    sizes.append(size)
+                else:
+                    sizes.append(0)  # Error indicator
+
+            return sizes, "Success"
+
+        except (AttributeError, TypeError, ValueError, OSError, MemoryError) as e:
+            return [], f"Exception during get_var_sizes_batch: {e}"
+
+    def get_var_values_batch(self, indexes: List[int]) -> Tuple[List[Tuple[Any, str]], str]:
+        """
+        Read multiple variable values in a single batch operation.
+
+        Args:
+            indexes: List of integer indexes to read values for
+
+        Returns:
+            Tuple[List[Tuple[Any, str]], str]: (results, error_message)
+                results format: [(value, error_msg), ...] for each index
+        """
+        if not indexes:
+            return [], "No indexes provided"
+
+        if not isinstance(indexes, (list, tuple)):
+            return [], "Indexes must be a list or tuple"
+
+        try:
+            results = []
+
+            # Get addresses in batch first
+            addresses, addr_msg = self.get_var_list(indexes)
+            if addr_msg != "Success":
+                # Fallback: individual operations
+                for index in indexes:
+                    value, msg = self.get_var_value(index)
+                    results.append((value, msg))
+                return results, "Partial batch operation completed"
+
+            # Get sizes in batch
+            sizes, size_msg = self.get_var_sizes_batch(indexes)
+            if size_msg != "Success":
+                # Fallback: individual operations
+                for index in indexes:
+                    value, msg = self.get_var_value(index)
+                    results.append((value, msg))
+                return results, "Partial batch operation completed"
+
+            # Read values using cached addresses and sizes
+            for i, index in enumerate(indexes):
+                try:
+                    address = addresses[i]
+                    size = sizes[i]
+
+                    if address is None or size == 0:
+                        results.append((None, f"Invalid address/size for index {index}"))
+                        continue
+
+                    # Direct memory read based on size
+                    if size == 1:
+                        value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint8))
+                        value = value_ptr.contents.value
+                    elif size == 2:
+                        value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint16))
+                        value = value_ptr.contents.value
+                    elif size == 4:
+                        value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint32))
+                        value = value_ptr.contents.value
+                    elif size == 8:
+                        value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint64))
+                        value = value_ptr.contents.value
+                    else:
+                        results.append((None, f"Unsupported variable size: {size}"))
+                        continue
+
+                    results.append((value, "Success"))
+
+                except (AttributeError, TypeError, ValueError, OSError, MemoryError) as e:
+                    results.append((None, f"Exception reading variable {index}: {e}"))
+
+            return results, "Batch read completed"
+
+        except (AttributeError, TypeError, ValueError, OSError, MemoryError) as e:
+            return [], f"Exception during get_var_values_batch: {e}"
+
+    def set_var_values_batch(self, index_value_pairs: List[Tuple[int, Any]]) -> Tuple[List[Tuple[bool, str]], str]:
+        """
+        Write multiple variable values in a single batch operation.
+
+        Args:
+            index_value_pairs: List of (index, value) tuples to write
+
+        Returns:
+            Tuple[List[Tuple[bool, str]], str]: (results, error_message)
+                results format: [(success, error_msg), ...] for each pair
+        """
+        if not index_value_pairs:
+            return [], "No index-value pairs provided"
+
+        if not isinstance(index_value_pairs, (list, tuple)):
+            return [], "Index-value pairs must be a list or tuple"
+
+        try:
+            results = []
+            indexes = [pair[0] for pair in index_value_pairs]
+
+            # Get addresses in batch first
+            addresses, addr_msg = self.get_var_list(indexes)
+            if addr_msg != "Success":
+                # Fallback: individual operations
+                for index, value in index_value_pairs:
+                    success, msg = self.set_var_value(index, value)
+                    results.append((success, msg))
+                return results, "Partial batch operation completed"
+
+            # Get sizes in batch
+            sizes, size_msg = self.get_var_sizes_batch(indexes)
+            if size_msg != "Success":
+                # Fallback: individual operations
+                for index, value in index_value_pairs:
+                    success, msg = self.set_var_value(index, value)
+                    results.append((success, msg))
+                return results, "Partial batch operation completed"
+
+            # Write values using cached addresses and sizes
+            for i, (index, value) in enumerate(index_value_pairs):
+                try:
+                    address = addresses[i]
+                    size = sizes[i]
+
+                    if address is None or size == 0:
+                        results.append((False, f"Invalid address/size for index {index}"))
+                        continue
+
+                    # Validate value type
+                    if not isinstance(value, (bool, int)):
+                        results.append((False, f"Invalid value type for index {index}: expected bool or int, got {type(value)}"))
+                        continue
+
+                    # Convert boolean to integer
+                    if isinstance(value, bool):
+                        value = 1 if value else 0
+
+                    # Write based on size
+                    if size == 1:
+                        if not (0 <= value <= 255):
+                            results.append((False, f"Invalid value for 8-bit: {value}"))
+                            continue
+                        value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint8))
+                        value_ptr.contents.value = value
+                    elif size == 2:
+                        if not (0 <= value <= 65535):
+                            results.append((False, f"Invalid value for 16-bit: {value}"))
+                            continue
+                        value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint16))
+                        value_ptr.contents.value = value
+                    elif size == 4:
+                        if not (0 <= value <= 4294967295):
+                            results.append((False, f"Invalid value for 32-bit: {value}"))
+                            continue
+                        value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint32))
+                        value_ptr.contents.value = value
+                    elif size == 8:
+                        if not (0 <= value <= 18446744073709551615):
+                            results.append((False, f"Invalid value for 64-bit: {value}"))
+                            continue
+                        value_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint64))
+                        value_ptr.contents.value = value
+                    else:
+                        results.append((False, f"Unsupported variable size: {size}"))
+                        continue
+
+                    results.append((True, "Success"))
+
+                except (AttributeError, TypeError, ValueError, OSError, MemoryError) as e:
+                    results.append((False, f"Exception writing variable {index}: {e}"))
+
+            return results, "Batch write completed"
+
+        except (AttributeError, TypeError, ValueError, OSError, MemoryError) as e:
+            return [], f"Exception during set_var_values_batch: {e}"
 
     def _infer_var_type_from_size(self, size: int) -> str:
         """

@@ -5,6 +5,7 @@ import threading
 import time
 import traceback
 import struct
+import ctypes
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 
@@ -44,6 +45,15 @@ class VariableNode:
     array_index: Optional[int] = None
 
 
+@dataclass
+class VariableMetadata:
+    """Metadata cache for direct memory access"""
+    index: int
+    address: int
+    size: int
+    inferred_type: str
+
+
 class OpcuaServer:
     """OPC-UA server implementation using opcua-asyncio."""
 
@@ -52,8 +62,10 @@ class OpcuaServer:
         self.sba = sba
         self.server: Optional[Server] = None
         self.variable_nodes: Dict[int, VariableNode] = {}
+        self.variable_metadata: Dict[int, VariableMetadata] = {}
         self.namespace_idx = None
         self.running = False
+        self._direct_memory_access_enabled = True
 
     async def setup_server(self) -> bool:
         """Initialize and configure the OPC-UA server."""
@@ -100,6 +112,10 @@ class OpcuaServer:
                 except Exception as e:
                     print(f"(FAIL) Error processing variable {variable.node_name}: {e}")
                     traceback.print_exc()
+
+            # Initialize variable metadata cache for direct memory access
+            var_indices = list(self.variable_nodes.keys())
+            await self._initialize_variable_cache(var_indices)
 
             print(f"(PASS) Created {len(self.variable_nodes)} variable nodes")
             return True
@@ -160,7 +176,7 @@ class OpcuaServer:
                     var_node.array_index = int(node_name.strip("[]")) if node_name.startswith("[") else 0
 
                 self.variable_nodes[var_def.index] = var_node
-                print(f"    ✓ Created variable: {current_path}")
+                print(f"    Created variable: {current_path}")
 
         except Exception as e:
             print(f"(FAIL) Failed to create variable node '{current_path}': {e}")
@@ -186,31 +202,54 @@ class OpcuaServer:
         return mapped_type
 
     async def update_variables_from_plc(self) -> None:
-        """Read values from PLC debug variables and update OPC-UA nodes."""
+        """Optimized update loop with metadata cache"""
         try:
             if not self.variable_nodes:
                 return
 
-            # Get list of variable indices to read
-            var_indices = list(self.variable_nodes.keys())
-
-            # Use debug utils to read variable values
-            for var_index in var_indices:
-                try:
-                    var_node = self.variable_nodes[var_index]
-
-                    # Read value using debug utils - index maps directly to debug variable
-                    value, msg = self.sba.get_var_value(var_index)
-                    if msg == "Success" and value is not None:
-                        await self._update_opcua_node(var_node, value)
-                    else:
-                        print(f"(FAIL) Failed to read debug variable {var_index}: {msg}")
-
-                except Exception as e:
-                    print(f"(FAIL) Error reading debug variable {var_index}: {e}")
+            # Optimized method: Direct memory access via cache
+            if self._direct_memory_access_enabled and self.variable_metadata:
+                await self._update_via_direct_memory_access()
+            else:
+                # Fallback: use batch methods (still better than individual)
+                await self._update_via_batch_operations()
 
         except Exception as e:
-            print(f"(FAIL) Error updating variables from PLC: {e}")
+            print(f"(FAIL) Error in optimized update loop: {e}")
+
+    async def _update_via_direct_memory_access(self) -> None:
+        """Direct memory access - ZERO C calls per variable!"""
+        for var_index, metadata in self.variable_metadata.items():
+            try:
+                # Direct memory access - no C calls!
+                value = self._read_memory_direct(metadata.address, metadata.size)
+
+                var_node = self.variable_nodes[var_index]
+                await self._update_opcua_node(var_node, value)
+
+            except Exception as e:
+                print(f"(FAIL) Direct memory access failed for var {var_index}: {e}")
+
+    async def _update_via_batch_operations(self) -> None:
+        """Fallback: batch operations (still much better than individual)"""
+        var_indices = list(self.variable_nodes.keys())
+
+        # Single batch call for all values
+        results, msg = self.sba.get_var_values_batch(var_indices)
+
+        if msg != "Success":
+            print(f"(FAIL) Batch read failed: {msg}")
+            return
+
+        # Process results
+        for i, (value, var_msg) in enumerate(results):
+            var_index = var_indices[i]
+            var_node = self.variable_nodes[var_index]
+
+            if var_msg == "Success" and value is not None:
+                await self._update_opcua_node(var_node, value)
+            else:
+                print(f"(FAIL) Failed to read variable {var_index}: {var_msg}")
 
     async def _update_opcua_node(self, var_node: VariableNode, value: Any) -> None:
         """Update an OPC-UA node with a new value."""
@@ -288,6 +327,75 @@ class OpcuaServer:
             except:
                 return int(value)
         return value
+
+    async def _initialize_variable_cache(self, indices: List[int]) -> None:
+        """Initialize metadata cache for direct memory access"""
+        try:
+            # Batch: get addresses
+            addresses, addr_msg = self.sba.get_var_list(indices)
+            if addr_msg != "Success":
+                print(f"(WARN) Failed to cache addresses: {addr_msg}")
+                self._direct_memory_access_enabled = False
+                return
+
+            # Batch: get sizes
+            sizes, size_msg = self.sba.get_var_sizes_batch(indices)
+            if size_msg != "Success":
+                print(f"(WARN) Failed to cache sizes: {size_msg}")
+                self._direct_memory_access_enabled = False
+                return
+
+            # Create cache
+            for i, var_index in enumerate(indices):
+                if addresses[i] is not None and sizes[i] > 0:
+                    metadata = VariableMetadata(
+                        index=var_index,
+                        address=addresses[i],
+                        size=sizes[i],
+                        inferred_type=self._infer_var_type(sizes[i])
+                    )
+                    self.variable_metadata[var_index] = metadata
+
+            print(f"(PASS) Cached metadata for {len(self.variable_metadata)} variables")
+
+        except Exception as e:
+            print(f"(WARN) Failed to initialize variable cache: {e}")
+            self._direct_memory_access_enabled = False
+
+    def _infer_var_type(self, size: int) -> str:
+        """Infer variable type from size"""
+        if size == 1:
+            return "BOOL_OR_SINT"
+        elif size == 2:
+            return "UINT16"
+        elif size == 4:
+            return "UINT32_OR_TIME"
+        elif size == 8:
+            return "UINT64_OR_TIME"
+        else:
+            return "UNKNOWN"
+
+    def _read_memory_direct(self, address: int, size: int) -> Any:
+        """Read value directly from memory using cached address"""
+
+        try:
+            if size == 1:
+                ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint8))
+                return ptr.contents.value
+            elif size == 2:
+                ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint16))
+                return ptr.contents.value
+            elif size == 4:
+                ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint32))
+                return ptr.contents.value
+            elif size == 8:
+                ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint64))
+                return ptr.contents.value
+            else:
+                raise ValueError(f"Unsupported variable size: {size}")
+
+        except Exception as e:
+            raise RuntimeError(f"Memory access error: {e}")
 
     async def start_server(self) -> bool:
         """Start the OPC-UA server."""

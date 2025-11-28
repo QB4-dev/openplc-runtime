@@ -162,6 +162,21 @@ class IDebugUtils:
         """Get comprehensive variable info. Returns (info_dict, error_message)"""
         pass
 
+    @abstractmethod
+    def get_var_sizes_batch(self, indexes: List[int]) -> Tuple[List[int], str]:
+        """Get sizes for multiple variables in batch. Returns (sizes, error_message)"""
+        pass
+
+    @abstractmethod
+    def get_var_values_batch(self, indexes: List[int]) -> Tuple[List[Tuple[Any, str]], str]:
+        """Read multiple variable values in batch. Returns (results, error_message)"""
+        pass
+
+    @abstractmethod
+    def set_var_values_batch(self, index_value_pairs: List[Tuple[int, Any]]) -> Tuple[List[Tuple[bool, str]], str]:
+        """Write multiple variable values in batch. Returns (results, error_message)"""
+        pass
+
 
 class IConfigHandler:
     """Interface for configuration file operations"""
