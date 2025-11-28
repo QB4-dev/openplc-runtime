@@ -247,26 +247,6 @@ class OpcuaServer:
         except Exception as e:
             print(f"(FAIL) Failed to update OPC-UA node for debug variable {var_node.debug_var_index}: {e}")
 
-    def _map_plc_to_opcua_type(self, plc_type: str) -> ua.VariantType:
-        """Map plc datatype to OPC-UA VariantType."""
-        return map_plc_to_opcua_type(plc_type)
-
-    def _convert_value_for_opcua(self, datatype: str, value: Any) -> Any:
-        """Convert PLC debug variable value to OPC-UA compatible format."""
-        return convert_value_for_opcua(datatype, value)
-
-    def _convert_value_for_plc(self, datatype: str, value: Any) -> Any:
-        """Convert OPC-UA value to PLC debug variable format."""
-        return convert_value_for_plc(datatype, value)
-
-    def _infer_var_type(self, size: int) -> str:
-        """Infer variable type from size."""
-        return infer_var_type(size)
-
-    def _read_memory_direct(self, address: int, size: int) -> Any:
-        """Read value directly from memory using cached address."""
-        return read_memory_direct(address, size)
-
     async def _initialize_variable_cache(self, indices: List[int]) -> None:
         """Initialize metadata cache for direct memory access."""
         self.variable_metadata = initialize_variable_cache(self.sba, indices)
