@@ -33,6 +33,7 @@ try:
         infer_var_type,
     )
     from .opcua_memory import read_memory_direct, initialize_variable_cache
+    from .opcua_security import OpcuaSecurityManager
 except ImportError:
     # Fallback to absolute imports (when run standalone)
     from opcua_types import VariableNode, VariableMetadata
@@ -43,6 +44,7 @@ except ImportError:
         infer_var_type,
     )
     from opcua_memory import read_memory_direct, initialize_variable_cache
+    from opcua_security import OpcuaSecurityManager
 
 # Global variables for plugin lifecycle and configuration
 runtime_args = None
@@ -65,10 +67,16 @@ class OpcuaServer:
         self.namespace_idx = None
         self.running = False
         self._direct_memory_access_enabled = True
+        self.security_manager = OpcuaSecurityManager(config)
 
     async def setup_server(self) -> bool:
         """Initialize and configure the OPC-UA server."""
         try:
+            # Initialize security settings
+            if not self.security_manager.initialize_security():
+                print("(FAIL) Failed to initialize security")
+                return False
+
             # Create server instance
             self.server = Server()
 
@@ -77,10 +85,25 @@ class OpcuaServer:
             self.server.set_endpoint(self.config.endpoint)
             self.server.set_server_name(self.config.server_name)
 
-            # Set up security (basic None policy for now)
-            # TODO: Implement certificate loading when certificate files are available
-            # await self.server.load_certificate(self.config.certificate, self.config.private_key)
-            # await self.server.load_private_key(self.config.private_key)
+            # Get security settings from security manager
+            security_policy, security_mode, cert_data, key_data = self.security_manager.get_security_settings()
+
+            # Configure security on the server
+            if security_policy is not None:
+                # Set security policy and mode
+                self.server.set_security_policy([security_policy])
+                self.server.set_security_mode([security_mode])
+
+                # Load certificates if provided
+                if cert_data is not None and key_data is not None:
+                    await self.server.load_certificate(cert_data, key_data)
+                    print("(PASS) Server certificates loaded")
+            else:
+                # No security - set None policy
+                from asyncua.crypto.security_policies import SecurityPolicyNone
+                self.server.set_security_policy([SecurityPolicyNone])
+                self.server.set_security_mode([1])  # MessageSecurityMode.None
+                print("(PASS) Server configured with no security")
 
             # Register namespace
             self.namespace_idx = await self.server.register_namespace(self.config.namespace)

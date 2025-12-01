@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional, Literal
 from dataclasses import dataclass
 import json
+import os
 
 try:
     from .plugin_config_contact import PluginConfigContract
@@ -173,6 +174,20 @@ class OpcuaConfig:
     namespace: str
     variables: List[OpcuaVariable]
 
+    # Valid security policies and modes
+    VALID_SECURITY_POLICIES = [
+        "None",
+        "Basic256Sha256",
+        "Aes128_Sha256_RsaOaep",
+        "Aes256_Sha256_RsaPss"
+    ]
+
+    VALID_SECURITY_MODES = [
+        "None",
+        "Sign",
+        "SignAndEncrypt"
+    ]
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'OpcuaConfig':
         """Creates an OpcuaConfig instance from a dictionary."""
@@ -191,7 +206,7 @@ class OpcuaConfig:
 
         variables = [OpcuaVariable.from_dict(var) for var in variables_data]
 
-        return cls(
+        config = cls(
             endpoint=endpoint,
             server_name=server_name,
             security_policy=security_policy,
@@ -202,6 +217,62 @@ class OpcuaConfig:
             namespace=namespace,
             variables=variables
         )
+
+        # Validate security configuration
+        config.validate_security_config()
+
+        return config
+
+    def validate_security_config(self) -> None:
+        """Validate security-related configuration."""
+        # Validate security policy
+        if self.security_policy not in self.VALID_SECURITY_POLICIES:
+            raise ValueError(
+                f"Invalid security_policy: '{self.security_policy}'. "
+                f"Valid options: {', '.join(self.VALID_SECURITY_POLICIES)}"
+            )
+
+        # Validate security mode
+        if self.security_mode not in self.VALID_SECURITY_MODES:
+            raise ValueError(
+                f"Invalid security_mode: '{self.security_mode}'. "
+                f"Valid options: {', '.join(self.VALID_SECURITY_MODES)}"
+            )
+
+        # Validate certificate requirements
+        requires_certificates = (
+            self.security_policy != "None" or
+            self.security_mode != "None"
+        )
+
+        if requires_certificates:
+            if not self.certificate:
+                raise ValueError(
+                    f"Certificate path required for security_policy='{self.security_policy}' "
+                    f"and security_mode='{self.security_mode}'"
+                )
+            if not self.private_key:
+                raise ValueError(
+                    f"Private key path required for security_policy='{self.security_policy}' "
+                    f"and security_mode='{self.security_mode}'"
+                )
+
+            # Check if certificate files exist
+            if not os.path.isfile(self.certificate):
+                raise ValueError(f"Certificate file not found: {self.certificate}")
+            if not os.path.isfile(self.private_key):
+                raise ValueError(f"Private key file not found: {self.private_key}")
+
+        # Validate consistency between policy and mode
+        if self.security_policy == "None" and self.security_mode != "None":
+            raise ValueError(
+                "Cannot use security_mode other than 'None' with security_policy='None'"
+            )
+
+        if self.security_mode == "None" and self.security_policy != "None":
+            raise ValueError(
+                "Cannot use security_policy other than 'None' with security_mode='None'"
+            )
 
 @dataclass
 class OpcuaPluginConfig:
