@@ -90,9 +90,8 @@ class OpcuaServer:
 
             # Configure security on the server
             if security_policy is not None:
-                # Set security policy and mode
+                # Set security policy (this handles both policy and mode in opcua-asyncio)
                 self.server.set_security_policy([security_policy])
-                self.server.set_security_mode([security_mode])
 
                 # Load certificates if provided
                 if cert_data is not None and key_data is not None:
@@ -102,7 +101,6 @@ class OpcuaServer:
                 # No security - set None policy
                 from asyncua.crypto.security_policies import SecurityPolicyNone
                 self.server.set_security_policy([SecurityPolicyNone])
-                self.server.set_security_mode([1])  # MessageSecurityMode.None
                 print("(PASS) Server configured with no security")
 
             # Register namespace
