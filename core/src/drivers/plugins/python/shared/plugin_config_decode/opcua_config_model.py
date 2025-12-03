@@ -9,6 +9,36 @@ except ImportError:
     # For direct execution
     from plugin_config_contact import PluginConfigContract
 
+@dataclass
+class ClientAuthConfig:
+    """Configuration for client authentication and trust management."""
+    enabled: bool = False
+    trust_all_clients: bool = False
+    trusted_certificates_pem: List[str] = None
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ClientAuthConfig':
+        """Creates a ClientAuthConfig instance from a dictionary."""
+        enabled = data.get("enabled", False)
+        trust_all_clients = data.get("trust_all_clients", False)
+        trusted_certificates_pem = data.get("trusted_certificates_pem", [])
+
+        return cls(
+            enabled=enabled,
+            trust_all_clients=trust_all_clients,
+            trusted_certificates_pem=trusted_certificates_pem
+        )
+
+    def validate(self) -> None:
+        """Validate client authentication configuration."""
+        if self.enabled and not self.trust_all_clients and not self.trusted_certificates_pem:
+            raise ValueError("Client authentication enabled but no trusted certificates provided")
+
+        if self.trusted_certificates_pem:
+            for cert_pem in self.trusted_certificates_pem:
+                if not cert_pem.startswith("-----BEGIN CERTIFICATE-----"):
+                    raise ValueError("Invalid certificate format in trusted_certificates_pem")
+
 AccessMode = Literal["readwrite", "readonly"]
 VariableType = Literal["STRUCT", "ARRAY"]
 
@@ -168,8 +198,7 @@ class OpcuaConfig:
     server_name: str
     security_policy: str
     security_mode: str
-    certificate: str
-    private_key: str
+    client_auth: ClientAuthConfig
     cycle_time_ms: int
     namespace: str
     variables: List[OpcuaVariable]
@@ -196,13 +225,15 @@ class OpcuaConfig:
             server_name = data["server_name"]
             security_policy = data["security_policy"]
             security_mode = data["security_mode"]
-            certificate = data["certificate"]
-            private_key = data["private_key"]
             cycle_time_ms = data["cycle_time_ms"]
             namespace = data["namespace"]
             variables_data = data["variables"]
         except KeyError as e:
             raise ValueError(f"Missing required field in OPC-UA config: {e}")
+
+        # Parse client authentication config
+        client_auth_data = data.get("client_auth", {})
+        client_auth = ClientAuthConfig.from_dict(client_auth_data)
 
         variables = [OpcuaVariable.from_dict(var) for var in variables_data]
 
@@ -211,8 +242,7 @@ class OpcuaConfig:
             server_name=server_name,
             security_policy=security_policy,
             security_mode=security_mode,
-            certificate=certificate,
-            private_key=private_key,
+            client_auth=client_auth,
             cycle_time_ms=cycle_time_ms,
             namespace=namespace,
             variables=variables
@@ -239,29 +269,8 @@ class OpcuaConfig:
                 f"Valid options: {', '.join(self.VALID_SECURITY_MODES)}"
             )
 
-        # Validate certificate requirements
-        requires_certificates = (
-            self.security_policy != "None" or
-            self.security_mode != "None"
-        )
-
-        if requires_certificates:
-            if not self.certificate:
-                raise ValueError(
-                    f"Certificate path required for security_policy='{self.security_policy}' "
-                    f"and security_mode='{self.security_mode}'"
-                )
-            if not self.private_key:
-                raise ValueError(
-                    f"Private key path required for security_policy='{self.security_policy}' "
-                    f"and security_mode='{self.security_mode}'"
-                )
-
-            # Check if certificate files exist
-            if not os.path.isfile(self.certificate):
-                raise ValueError(f"Certificate file not found: {self.certificate}")
-            if not os.path.isfile(self.private_key):
-                raise ValueError(f"Private key file not found: {self.private_key}")
+        # Validate client authentication config
+        self.client_auth.validate()
 
         # Validate consistency between policy and mode
         if self.security_policy == "None" and self.security_mode != "None":
@@ -272,6 +281,12 @@ class OpcuaConfig:
         if self.security_mode == "None" and self.security_policy != "None":
             raise ValueError(
                 "Cannot use security_policy other than 'None' with security_mode='None'"
+            )
+
+        # Validate that client auth is only enabled when security is enabled
+        if self.client_auth.enabled and self.security_policy == "None":
+            raise ValueError(
+                "Client authentication cannot be enabled when security_policy is 'None'"
             )
 
 @dataclass

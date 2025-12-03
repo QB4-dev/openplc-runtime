@@ -67,13 +67,13 @@ class OpcuaServer:
         self.namespace_idx = None
         self.running = False
         self._direct_memory_access_enabled = True
-        self.security_manager = OpcuaSecurityManager(config)
+        self.security_manager = OpcuaSecurityManager(config, os.path.dirname(__file__))
 
     async def setup_server(self) -> bool:
         """Initialize and configure the OPC-UA server."""
         try:
             # Initialize security settings
-            if not self.security_manager.initialize_security():
+            if not await self.security_manager.initialize_security():
                 print("(FAIL) Failed to initialize security")
                 return False
 
