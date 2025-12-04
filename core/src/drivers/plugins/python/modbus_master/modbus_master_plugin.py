@@ -5,11 +5,40 @@ import traceback
 import re
 import threading
 import time
+import math
 from typing import Optional, Literal, List, Dict, Any
 
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusIOException, ConnectionException
 from pymodbus.pdu import ExceptionResponse
+
+def gcd(a: int, b: int) -> int:
+    """
+    Calculate the Greatest Common Divisor of two numbers using Euclidean algorithm.
+    """
+    while b != 0:
+        a, b = b, a % b
+    return a
+
+def calculate_gcd_of_cycle_times(io_points: List[Any]) -> int:
+    """
+    Calculate the GCD of all cycle_time_ms values from I/O points.
+    If no points have cycle_time_ms, return 1000 (1 second default).
+    """
+    cycle_times = []
+    for point in io_points:
+        if hasattr(point, 'cycle_time_ms') and point.cycle_time_ms > 0:
+            cycle_times.append(point.cycle_time_ms)
+
+    if not cycle_times:
+        return 1000  # Default 1 second
+
+    # Calculate GCD of all cycle times
+    result = cycle_times[0]
+    for time_ms in cycle_times[1:]:
+        result = gcd(result, time_ms)
+
+    return result
 
 def get_batch_read_requests_from_io_points(io_points: List[Any]) -> Dict[int, List[Any]]:
     """
@@ -172,7 +201,11 @@ class ModbusSlaveDevice(threading.Thread):
         self._stop_event = threading.Event()
         self.client: Optional[ModbusTcpClient] = None
         self.name = f"ModbusSlave-{device_config.name}-{device_config.host}:{device_config.port}"
-        
+
+        # Calculate GCD of all I/O point cycle times for this device
+        self.gcd_cycle_time_ms = calculate_gcd_of_cycle_times(device_config.io_points)
+        print(f"[{self.name}] Calculated GCD cycle time: {self.gcd_cycle_time_ms}ms")
+
         # Retry configuration - simple system
         self.retry_delay_base = 2.0      # initial delay between attempts (seconds)
         self.retry_delay_max = 30.0      # maximum delay between attempts (seconds)
@@ -593,9 +626,9 @@ class ModbusSlaveDevice(threading.Thread):
 
     def run(self):
         print(f"[{self.name}] Thread started.")
-        
-        cycle_time = self.device_config.cycle_time_ms / 1000.0
+
         io_points = self.device_config.io_points
+        gcd_cycle_time_seconds = self.gcd_cycle_time_ms / 1000.0
 
         if not io_points:
             print(f"[{self.name}] No I/O points defined. Stopping thread.")
@@ -606,98 +639,105 @@ class ModbusSlaveDevice(threading.Thread):
             print(f"[{self.name}] Thread stopped before connection could be established.")
             return
 
+        # Initialize cycle counter
+        cycle_counter = 0
+
         try:
             while not self._stop_event.is_set():
                 cycle_start_time = time.monotonic()
-                
+
                 # Ensure connection exists before cycle
                 if not self._ensure_connection():
                     break  # Thread was interrupted
 
-                # 1. READ OPERATIONS - Collect all read requests and store results
-                read_requests = get_batch_read_requests_from_io_points(io_points)
+                # 1. READ OPERATIONS - Process only I/O points that are due for polling this cycle
                 read_results_to_update = []  # Store tuples: (iec_addr, modbus_data, length)
-                
-                # Perform all Modbus read operations first
-                for fc, points in read_requests.items():
+
+                # Check each read point individually
+                for point in io_points:
                     if self._stop_event.is_set():
                         break
 
-                    for point in points:
-                        if self._stop_event.is_set():
-                            break
+                    # Skip if this point doesn't need to be polled this cycle
+                    if point.fc not in [1, 2, 3, 4]:  # Read functions
+                        continue
 
+                    # Calculate if this point should be polled: (cycle_counter % (point_cycle_time / gcd)) == 0
+                    point_cycle_multiple = point.cycle_time_ms // self.gcd_cycle_time_ms
+                    if (cycle_counter % point_cycle_multiple) != 0:
+                        continue
+
+                    try:
+                        # Convert offset string to integer
+                        if not isinstance(point.offset, str) or not point.offset.strip():
+                            raise ValueError(f"Offset must be a non-empty string, got: {point.offset!r} (type: {type(point.offset)})")
+
+                        # Try to convert to integer, handling decimal and hexadecimal formats
+                        offset_str = point.offset.strip()
                         try:
-                            # Convert offset string to integer
-                            if not isinstance(point.offset, str) or not point.offset.strip():
-                                raise ValueError(f"Offset must be a non-empty string, got: {point.offset!r} (type: {type(point.offset)})")
-                            
-                            # Try to convert to integer, handling decimal and hexadecimal formats
-                            offset_str = point.offset.strip()
-                            try:
-                                # Support both decimal (123) and hexadecimal (0x1234, 0X1234) formats
-                                if offset_str.lower().startswith('0x'):
-                                    address = int(offset_str, 16)  # Hexadecimal
-                                else:
-                                    address = int(offset_str, 10)  # Decimal
-                            except ValueError as conv_err:
-                                raise ValueError(f"Cannot convert offset '{offset_str}' to integer (supports decimal or 0x hex): {conv_err}")
-                            
-                            if address < 0:
-                                raise ValueError(f"Offset must be non-negative, got: {address}")
-                            
-                            # Calculate the correct number of Modbus registers/coils needed
-                            if fc in [3, 4]:  # Register-based operations (FC 3,4)
-                                iec_size = point.iec_location.size
-                                registers_per_iec_element = get_modbus_registers_count_for_iec_size(iec_size)
-                                count = point.length * registers_per_iec_element
-                            else:  # Coil/Discrete Input operations (FC 1,2)
-                                count = point.length  # 1:1 mapping for boolean operations
-                            
-                            # Perform Modbus read based on function code
-                            if fc == 1:  # Read Coils
-                                response = self.client.read_coils(address, count)
-                            elif fc == 2:  # Read Discrete Inputs
-                                response = self.client.read_discrete_inputs(address, count)
-                            elif fc == 3:  # Read Holding Registers
-                                response = self.client.read_holding_registers(address, count)
-                            elif fc == 4:  # Read Input Registers
-                                response = self.client.read_input_registers(address, count)
+                            # Support both decimal (123) and hexadecimal (0x1234, 0X1234) formats
+                            if offset_str.lower().startswith('0x'):
+                                address = int(offset_str, 16)  # Hexadecimal
                             else:
-                                print(f"[{self.name}] Unsupported read FC: {fc}")
-                                continue
-                            
-                            # Check if response is valid
-                            if isinstance(response, (ModbusIOException, ExceptionResponse)):
-                                print(f"[{self.name}] (FAIL) Modbus read error (FC {fc}, addr {address}): {response}")
-                                # Mark as disconnected to force reconnection on next cycle
-                                self.is_connected = False
-                                continue
-                            elif response.isError():
-                                print(f"[{self.name}] (FAIL) Modbus read failed (FC {fc}, addr {address}): {response}")
-                                # Mark as disconnected to force reconnection on next cycle
-                                self.is_connected = False
-                                continue
-                            
-                            # Extract data from response
-                            if fc in [1, 2]:  # Coils/Discrete Inputs (boolean data)
-                                modbus_data = response.bits
-                            else:  # Holding/Input Registers (integer data)
-                                modbus_data = response.registers
-                            
-                            # Store for batch update
-                            read_results_to_update.append((point.iec_location, modbus_data, point.length))
-                            
-                        except ValueError as ve:
-                            print(f"[{self.name}] (FAIL) Invalid offset '{point.offset}' for FC {fc}: {ve}")
-                        except ConnectionException as ce:
-                            print(f"[{self.name}] (FAIL) Connection error reading FC {fc}, offset {point.offset}: {ce}")
-                            # Mark as disconnected to force reconnection
+                                address = int(offset_str, 10)  # Decimal
+                        except ValueError as conv_err:
+                            raise ValueError(f"Cannot convert offset '{offset_str}' to integer (supports decimal or 0x hex): {conv_err}")
+
+                        if address < 0:
+                            raise ValueError(f"Offset must be non-negative, got: {address}")
+
+                        # Calculate the correct number of Modbus registers/coils needed
+                        if point.fc in [3, 4]:  # Register-based operations (FC 3,4)
+                            iec_size = point.iec_location.size
+                            registers_per_iec_element = get_modbus_registers_count_for_iec_size(iec_size)
+                            count = point.length * registers_per_iec_element
+                        else:  # Coil/Discrete Input operations (FC 1,2)
+                            count = point.length  # 1:1 mapping for boolean operations
+
+                        # Perform Modbus read based on function code
+                        if point.fc == 1:  # Read Coils
+                            response = self.client.read_coils(address, count)
+                        elif point.fc == 2:  # Read Discrete Inputs
+                            response = self.client.read_discrete_inputs(address, count)
+                        elif point.fc == 3:  # Read Holding Registers
+                            response = self.client.read_holding_registers(address, count)
+                        elif point.fc == 4:  # Read Input Registers
+                            response = self.client.read_input_registers(address, count)
+                        else:
+                            print(f"[{self.name}] Unsupported read FC: {point.fc}")
+                            continue
+
+                        # Check if response is valid
+                        if isinstance(response, (ModbusIOException, ExceptionResponse)):
+                            print(f"[{self.name}] (FAIL) Modbus read error (FC {point.fc}, addr {address}): {response}")
+                            # Mark as disconnected to force reconnection on next cycle
                             self.is_connected = False
-                        except Exception as e:
-                            print(f"[{self.name}] (FAIL) Error reading FC {fc}, offset {point.offset}: {e}")
-                            # For other errors also mark disconnected as precaution
+                            continue
+                        elif response.isError():
+                            print(f"[{self.name}] (FAIL) Modbus read failed (FC {point.fc}, addr {address}): {response}")
+                            # Mark as disconnected to force reconnection on next cycle
                             self.is_connected = False
+                            continue
+
+                        # Extract data from response
+                        if point.fc in [1, 2]:  # Coils/Discrete Inputs (boolean data)
+                            modbus_data = response.bits
+                        else:  # Holding/Input Registers (integer data)
+                            modbus_data = response.registers
+
+                        # Store for batch update
+                        read_results_to_update.append((point.iec_location, modbus_data, point.length))
+
+                    except ValueError as ve:
+                        print(f"[{self.name}] (FAIL) Invalid offset '{point.offset}' for FC {point.fc}: {ve}")
+                    except ConnectionException as ce:
+                        print(f"[{self.name}] (FAIL) Connection error reading FC {point.fc}, offset {point.offset}: {ce}")
+                        # Mark as disconnected to force reconnection
+                        self.is_connected = False
+                    except Exception as e:
+                        print(f"[{self.name}] (FAIL) Error reading FC {point.fc}, offset {point.offset}: {e}")
+                        # For other errors also mark disconnected as precaution
+                        self.is_connected = False
 
                 # Batch update IEC buffers with single mutex acquisition
                 if read_results_to_update:
@@ -711,105 +751,111 @@ class ModbusSlaveDevice(threading.Thread):
                     else:
                         print(f"[{self.name}] (FAIL) Failed to acquire mutex for read updates: {lock_msg}")
 
-                # 2. WRITE OPERATIONS - Read from IEC buffers and perform Modbus writes
-                write_requests = get_batch_write_requests_from_io_points(io_points)
-                
-                for fc, points in write_requests.items():
+                # 2. WRITE OPERATIONS - Process only I/O points that are due for polling this cycle
+                for point in io_points:
                     if self._stop_event.is_set():
                         break
 
-                    for point in points:
-                        if self._stop_event.is_set():
-                            break
+                    # Skip if this point doesn't need to be polled this cycle
+                    if point.fc not in [5, 6, 15, 16]:  # Write functions
+                        continue
+
+                    # Calculate if this point should be polled: (cycle_counter % (point_cycle_time / gcd)) == 0
+                    point_cycle_multiple = point.cycle_time_ms // self.gcd_cycle_time_ms
+                    if (cycle_counter % point_cycle_multiple) != 0:
+                        continue
+
+                    try:
+                        # Convert offset string to integer
+                        if not isinstance(point.offset, str) or not point.offset.strip():
+                            raise ValueError(f"Offset must be a non-empty string, got: {point.offset!r} (type: {type(point.offset)})")
+
+                        # Try to convert to integer, handling decimal and hexadecimal formats
+                        offset_str = point.offset.strip()
+                        try:
+                            # Support both decimal (123) and hexadecimal (0x1234, 0X1234) formats
+                            if offset_str.lower().startswith('0x'):
+                                address = int(offset_str, 16)  # Hexadecimal
+                            else:
+                                address = int(offset_str, 10)  # Decimal
+                        except ValueError as conv_err:
+                            raise ValueError(f"Cannot convert offset '{offset_str}' to integer (supports decimal or 0x hex): {conv_err}")
+
+                        if address < 0:
+                            raise ValueError(f"Offset must be non-negative, got: {address}")
+
+                        # Read data from IEC buffers (with mutex)
+                        lock_acquired, lock_msg = self.sba.acquire_mutex()
+                        if not lock_acquired:
+                            print(f"[{self.name}] (FAIL) Failed to acquire mutex for write prep (FC {point.fc}, offset {point.offset}): {lock_msg}")
+                            continue
 
                         try:
-                            # Convert offset string to integer
-                            if not isinstance(point.offset, str) or not point.offset.strip():
-                                raise ValueError(f"Offset must be a non-empty string, got: {point.offset!r} (type: {type(point.offset)})")
-                            
-                            # Try to convert to integer, handling decimal and hexadecimal formats
-                            offset_str = point.offset.strip()
-                            try:
-                                # Support both decimal (123) and hexadecimal (0x1234, 0X1234) formats
-                                if offset_str.lower().startswith('0x'):
-                                    address = int(offset_str, 16)  # Hexadecimal
-                                else:
-                                    address = int(offset_str, 10)  # Decimal
-                            except ValueError as conv_err:
-                                raise ValueError(f"Cannot convert offset '{offset_str}' to integer (supports decimal or 0x hex): {conv_err}")
-                            
-                            if address < 0:
-                                raise ValueError(f"Offset must be non-negative, got: {address}")
-                            
-                            # Read data from IEC buffers (with mutex)
-                            lock_acquired, lock_msg = self.sba.acquire_mutex()
-                            if not lock_acquired:
-                                print(f"[{self.name}] (FAIL) Failed to acquire mutex for write prep (FC {fc}, offset {point.offset}): {lock_msg}")
-                                continue
-                                
-                            try:
-                                values_to_write = self._read_data_for_modbus_write(point.iec_location, point.length)
-                            finally:
-                                self.sba.release_mutex()
-                            
-                            if values_to_write is None:
-                                print(f"[{self.name}] (FAIL) Failed to read data for Modbus write (FC {fc}, offset {point.offset})")
-                                continue
-                            
-                            # Perform Modbus write operation
-                            if fc == 5:  # Write Single Coil
-                                if len(values_to_write) > 0:
-                                    response = self.client.write_coil(address, values_to_write[0])
-                                else:
-                                    print(f"[{self.name}] (FAIL) No data to write for FC 5, offset {address}")
-                                    continue
-                            elif fc == 6:  # Write Single Register
-                                if len(values_to_write) > 0:
-                                    response = self.client.write_register(address, values_to_write[0])
-                                else:
-                                    print(f"[{self.name}] (FAIL) No data to write for FC 6, offset {address}")
-                                    continue
-                            elif fc == 15:  # Write Multiple Coils
-                                response = self.client.write_coils(address, values_to_write)
-                            elif fc == 16:  # Write Multiple Registers
-                                response = self.client.write_registers(address, values_to_write)
+                            values_to_write = self._read_data_for_modbus_write(point.iec_location, point.length)
+                        finally:
+                            self.sba.release_mutex()
+
+                        if values_to_write is None:
+                            print(f"[{self.name}] (FAIL) Failed to read data for Modbus write (FC {point.fc}, offset {point.offset})")
+                            continue
+
+                        # Perform Modbus write operation
+                        if point.fc == 5:  # Write Single Coil
+                            if len(values_to_write) > 0:
+                                response = self.client.write_coil(address, values_to_write[0])
                             else:
-                                print(f"[{self.name}] Unsupported write FC: {fc}")
+                                print(f"[{self.name}] (FAIL) No data to write for FC 5, offset {address}")
                                 continue
-                            
-                            # Check write response
-                            if isinstance(response, (ModbusIOException, ExceptionResponse)):
-                                print(f"[{self.name}] (FAIL) Modbus write error (FC {fc}, addr {address}): {response}")
-                                # Mark as disconnected to force reconnection on next cycle
-                                self.is_connected = False
-                            elif response.isError():
-                                print(f"[{self.name}] (FAIL) Modbus write failed (FC {fc}, addr {address}): {response}")
-                                # Mark as disconnected to force reconnection on next cycle
-                                self.is_connected = False
-                            
-                        except ValueError as ve:
-                            print(f"[{self.name}] (FAIL) Invalid offset '{point.offset}' for FC {fc}: {ve}")
-                        except ConnectionException as ce:
-                            print(f"[{self.name}] (FAIL) Connection error writing FC {fc}, offset {point.offset}: {ce}")
-                            # Mark as disconnected to force reconnection
+                        elif point.fc == 6:  # Write Single Register
+                            if len(values_to_write) > 0:
+                                response = self.client.write_register(address, values_to_write[0])
+                            else:
+                                print(f"[{self.name}] (FAIL) No data to write for FC 6, offset {address}")
+                                continue
+                        elif point.fc == 15:  # Write Multiple Coils
+                            response = self.client.write_coils(address, values_to_write)
+                        elif point.fc == 16:  # Write Multiple Registers
+                            response = self.client.write_registers(address, values_to_write)
+                        else:
+                            print(f"[{self.name}] Unsupported write FC: {point.fc}")
+                            continue
+
+                        # Check write response
+                        if isinstance(response, (ModbusIOException, ExceptionResponse)):
+                            print(f"[{self.name}] (FAIL) Modbus write error (FC {point.fc}, addr {address}): {response}")
+                            # Mark as disconnected to force reconnection on next cycle
                             self.is_connected = False
-                        except Exception as e:
-                            print(f"[{self.name}] (FAIL) Error writing FC {fc}, offset {point.offset}: {e}")
-                            # For other errors also mark disconnected as precaution
+                        elif response.isError():
+                            print(f"[{self.name}] (FAIL) Modbus write failed (FC {point.fc}, addr {address}): {response}")
+                            # Mark as disconnected to force reconnection on next cycle
                             self.is_connected = False
-                
-                # 3. CYCLE TIMING
+
+                    except ValueError as ve:
+                        print(f"[{self.name}] (FAIL) Invalid offset '{point.offset}' for FC {point.fc}: {ve}")
+                    except ConnectionException as ce:
+                        print(f"[{self.name}] (FAIL) Connection error writing FC {point.fc}, offset {point.offset}: {ce}")
+                        # Mark as disconnected to force reconnection
+                        self.is_connected = False
+                    except Exception as e:
+                        print(f"[{self.name}] (FAIL) Error writing FC {point.fc}, offset {point.offset}: {e}")
+                        # For other errors also mark disconnected as precaution
+                        self.is_connected = False
+
+                # 3. CYCLE TIMING - Sleep for GCD cycle time
                 cycle_elapsed = time.monotonic() - cycle_start_time
-                sleep_duration = max(0, cycle_time - cycle_elapsed)
+                sleep_duration = max(0, gcd_cycle_time_seconds - cycle_elapsed)
                 if sleep_duration > 0:
                     # Sleep in small increments (100ms each) to allow for quick shutdown
                     sleep_increment = 0.1
                     remaining_sleep = sleep_duration
-                    
+
                     while remaining_sleep > 0 and not self._stop_event.is_set():
                         actual_sleep = min(sleep_increment, remaining_sleep)
                         time.sleep(actual_sleep)
                         remaining_sleep -= actual_sleep
+
+                # Increment cycle counter
+                cycle_counter += 1
 
         except ConnectionException as ce:
             print(f"[{self.name}] (FAIL) Connection failed: {ce}")
