@@ -172,7 +172,7 @@ class ModbusSlaveDevice(threading.Thread):
                                 f"(FC {point.fc}, addr {address}): {response}"
                             )
                             # Mark as disconnected to force reconnection on next cycle
-                            self.connection_manager.is_connected = False
+                            self.connection_manager.mark_disconnected()
                             continue
                         if response.isError():
                             print(
@@ -180,7 +180,7 @@ class ModbusSlaveDevice(threading.Thread):
                                 f"(FC {point.fc}, addr {address}): {response}"
                             )
                             # Mark as disconnected to force reconnection on next cycle
-                            self.connection_manager.is_connected = False
+                            self.connection_manager.mark_disconnected()
                             continue
 
                         # Extract data from response
@@ -205,14 +205,14 @@ class ModbusSlaveDevice(threading.Thread):
                             f"FC {point.fc}, offset {point.offset}: {ce}"
                         )
                         # Mark as disconnected to force reconnection
-                        self.connection_manager.is_connected = False
+                        self.connection_manager.mark_disconnected()
                     except Exception as e:
                         print(
                             f"[{self.name}] (FAIL) Error reading "
                             f"FC {point.fc}, offset {point.offset}: {e}"
                         )
                         # For other errors also mark disconnected as precaution
-                        self.connection_manager.is_connected = False
+                        self.connection_manager.mark_disconnected()
 
                 # Batch update IEC buffers with single mutex acquisition
                 if read_results_to_update:
@@ -316,14 +316,14 @@ class ModbusSlaveDevice(threading.Thread):
                                 f"(FC {point.fc}, addr {address}): {response}"
                             )
                             # Mark as disconnected to force reconnection on next cycle
-                            self.connection_manager.is_connected = False
+                            self.connection_manager.mark_disconnected()
                         elif response.isError():
                             print(
                                 f"[{self.name}] (FAIL) Modbus write failed "
                                 f"(FC {point.fc}, addr {address}): {response}"
                             )
                             # Mark as disconnected to force reconnection on next cycle
-                            self.connection_manager.is_connected = False
+                            self.connection_manager.mark_disconnected()
 
                     except ValueError as ve:
                         print(
@@ -336,14 +336,14 @@ class ModbusSlaveDevice(threading.Thread):
                             f"FC {point.fc}, offset {point.offset}: {ce}"
                         )
                         # Mark as disconnected to force reconnection
-                        self.connection_manager.is_connected = False
+                        self.connection_manager.mark_disconnected()
                     except Exception as e:
                         print(
                             f"[{self.name}] (FAIL) Error writing "
                             f"FC {point.fc}, offset {point.offset}: {e}"
                         )
                         # For other errors also mark disconnected as precaution
-                        self.connection_manager.is_connected = False
+                        self.connection_manager.mark_disconnected()
 
                 # 3. CYCLE TIMING - Sleep for GCD cycle time
                 cycle_elapsed = time.monotonic() - cycle_start_time
@@ -363,8 +363,8 @@ class ModbusSlaveDevice(threading.Thread):
 
         except ConnectionException as ce:
             print(f"[{self.name}] (FAIL) Connection failed: {ce}")
-            # Try to reconnect
-            self.connection_manager.is_connected = False
+            # Mark as disconnected to force reconnection
+            self.connection_manager.mark_disconnected()
         except Exception as e:
             print(f"[{self.name}] (FAIL) Unexpected error in thread: {e}")
             traceback.print_exc()

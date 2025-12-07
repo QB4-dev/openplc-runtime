@@ -2,11 +2,11 @@
 
 import time
 from typing import Optional
+
 from pymodbus.client import ModbusTcpClient
-from pymodbus.exceptions import ConnectionException
 
 
-class ModbusConnectionManager:
+class ModbusConnectionManager:  # pylint: disable=too-many-instance-attributes
     """Manages Modbus TCP connections with retry logic."""
 
     def __init__(self, host: str, port: int, timeout_ms: int):
@@ -15,11 +15,12 @@ class ModbusConnectionManager:
         self.timeout = timeout_ms / 1000.0  # Convert to seconds
 
         # Retry configuration
-        self.retry_delay_base = 2.0      # initial delay between attempts (seconds)
-        self.retry_delay_max = 30.0      # maximum delay between attempts (seconds)
+        self.retry_delay_base = 2.0  # initial delay between attempts (seconds)
+        self.retry_delay_max = 30.0  # maximum delay between attempts (seconds)
         self.retry_delay_current = self.retry_delay_base
 
-        # Connection state
+        # Connection state - is_connected is the authoritative flag for connection health
+        # It is set to False when any error occurs, forcing reconnection on next cycle
         self.client: Optional[ModbusTcpClient] = None
         self.is_connected = False
 
@@ -42,17 +43,17 @@ class ModbusConnectionManager:
                     if self.client:
                         try:
                             self.client.close()
-                        except:
+                        except Exception:
                             pass
                     self.client = ModbusTcpClient(
-                        host=self.host,
-                        port=self.port,
-                        timeout=self.timeout
+                        host=self.host, port=self.port, timeout=self.timeout
                     )
 
                 # Attempt to connect
                 if self.client.connect():
-                    print(f"(PASS) Connected to {self.host}:{self.port} (attempt {retry_count + 1})")
+                    print(
+                        f"(PASS) Connected to {self.host}:{self.port} (attempt {retry_count + 1})"
+                    )
                     self.is_connected = True
                     self.retry_delay_current = self.retry_delay_base  # Reset delay
                     return True
@@ -88,21 +89,48 @@ class ModbusConnectionManager:
         """
         Ensures there is a valid connection, reconnecting if necessary.
 
+        This method checks BOTH the pymodbus client state AND our is_connected flag.
+        The is_connected flag is set to False when any communication error occurs,
+        which forces a full reconnection even if pymodbus thinks the socket is still open.
+
         Args:
             stop_event: Optional threading.Event to allow early termination
 
         Returns:
             True if connection is available, False if interrupted
         """
-        # Check if already connected
-        if self.client and self.client.connected:
+        # Check if already connected - must check BOTH conditions:
+        # 1. is_connected flag (set to False on any error)
+        # 2. client.connected (pymodbus internal socket state)
+        if self.is_connected and self.client and self.client.connected:
             return True
 
-        # Mark as disconnected
+        # Connection is broken or marked as unhealthy - force full reconnection
+        # First, close any existing client to clean up dead sockets
+        if self.client:
+            try:
+                self.client.close()
+            except Exception:
+                pass  # Ignore errors during cleanup
+            self.client = None
+
         self.is_connected = False
 
-        # Try to reconnect
+        # Try to reconnect with infinite retry
         return self.connect_with_retry(stop_event)
+
+    def mark_disconnected(self):
+        """
+        Mark the connection as broken, forcing reconnection on next ensure_connection() call.
+
+        This should be called when any communication error occurs (timeout, broken pipe,
+        ModbusIOException, etc.) to ensure the connection is properly re-established.
+        """
+        self.is_connected = False
+        print(
+            f"Connection to {self.host}:{self.port} marked as disconnected, "
+            "will reconnect on next cycle"
+        )
 
     def disconnect(self):
         """Close the connection and clean up resources."""
