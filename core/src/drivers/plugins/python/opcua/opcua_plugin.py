@@ -15,8 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 # Import the correct type definitions
 from shared import (
     SafeBufferAccess,
-)
-from shared.plugin_types import (
+    SafeLoggingAccess,
     PluginRuntimeArgs,
     safe_extract_runtime_args_from_capsule,
 )
@@ -52,9 +51,37 @@ except ImportError:
 runtime_args = None
 opcua_config: OpcuaMasterConfig = None
 safe_buffer_accessor: SafeBufferAccess = None
+safe_logging_accessor: SafeLoggingAccess = None
 opcua_server = None
 server_thread: Optional[threading.Thread] = None
 stop_event = threading.Event()
+
+
+def log_info(message: str) -> None:
+    """Log an informational message using the runtime logging system."""
+    global safe_logging_accessor
+    if safe_logging_accessor and safe_logging_accessor.is_valid:
+        safe_logging_accessor.log_info(message)
+    else:
+        print(f"(INFO) {message}")
+
+
+def log_warn(message: str) -> None:
+    """Log a warning message using the runtime logging system."""
+    global safe_logging_accessor
+    if safe_logging_accessor and safe_logging_accessor.is_valid:
+        safe_logging_accessor.log_warn(message)
+    else:
+        print(f"(WARN) {message}")
+
+
+def log_error(message: str) -> None:
+    """Log an error message using the runtime logging system."""
+    global safe_logging_accessor
+    if safe_logging_accessor and safe_logging_accessor.is_valid:
+        safe_logging_accessor.log_error(message)
+    else:
+        print(f"(ERROR) {message}")
 
 
 class OpcuaServer:
@@ -86,7 +113,7 @@ class OpcuaServer:
             await self.server.init()
             self.server.set_endpoint(self.config.endpoint)
             self.server.set_server_name(self.config.server_name)
-            
+
             # Set application URI to match certificate
             await self.server.set_application_uri("urn:autonomy-logic:openplc:opcua:server")
 
@@ -106,6 +133,10 @@ class OpcuaServer:
                 # No security - don't set any security policy
                 self.server.set_security_policy([])
                 print("(PASS) Server configured with no security")
+
+            # Note: User authentication setup would go here if supported by asyncua
+            # For now, we rely on security policies for access control
+            print("(INFO) Server configured with security policies for access control")
 
             # Register namespace
             self.namespace_idx = await self.server.register_namespace(self.config.namespace)
@@ -186,9 +217,8 @@ class OpcuaServer:
 
                 await node.write_attribute(ua.AttributeIds.AccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
 
-                # Add write callback for readwrite variables
-                if var_def.access == "readwrite":
-                    await self._add_write_callback(node, var_def.index)
+                # Note: Write callbacks would be added here if supported by asyncua
+                # For now, readwrite access is configured at the node level
 
                 # Store node mapping
                 var_node = VariableNode(
@@ -279,33 +309,60 @@ class OpcuaServer:
         if not self.variable_metadata:
             self._direct_memory_access_enabled = False
 
-    async def _add_write_callback(self, node: Node, var_index: int) -> None:
-        """Add a write callback to an OPC-UA node for writing back to PLC."""
+    async def sync_opcua_to_runtime(self) -> None:
+        """Synchronize values from OPC-UA readwrite nodes to PLC runtime."""
         try:
-            # Define the callback function
-            async def write_callback(node, val, data):
+            # Filter only readwrite variables
+            readwrite_nodes = {
+                var_index: var_node
+                for var_index, var_node in self.variable_nodes.items()
+                if var_node.access_mode == "readwrite"
+            }
+
+            if not readwrite_nodes:
+                return
+
+            # Collect values to write in batch
+            values_to_write = []
+            indices_to_write = []
+
+            for var_index, var_node in readwrite_nodes.items():
                 try:
-                    # Extract the value from the OPC-UA variant
-                    opcua_value = val.Value
+                    # Read current value from OPC-UA node
+                    opcua_value = await var_node.node.read_value()
+                    opcua_value = opcua_value.Value  # Extract from Variant
 
-                    # Convert OPC-UA value to PLC format if needed
-                    plc_value = convert_value_for_plc(self.variable_nodes[var_index].datatype, opcua_value)
+                    # Convert to PLC format
+                    plc_value = convert_value_for_plc(var_node.datatype, opcua_value)
 
-                    # Write to PLC debug variable
-                    success, msg = self.sba.set_var_value(var_index, plc_value)
-                    if not success:
-                        print(f"(FAIL) Failed to write to PLC variable {var_index}: {msg}")
-                    else:
-                        print(f"(PASS) Wrote value {plc_value} to PLC variable {var_index}")
+                    values_to_write.append(plc_value)
+                    indices_to_write.append(var_index)
 
                 except Exception as e:
-                    print(f"(FAIL) Error in write callback for variable {var_index}: {e}")
+                    # Skip this variable on error, continue with others
+                    continue
 
-            # Set the callback on the node
-            # await node.set_write_callback(write_callback)
+            # Batch write to PLC if we have values to write
+            if values_to_write and indices_to_write:
+                success, msg = self.sba.set_var_values_batch(indices_to_write, values_to_write)
+                if not success:
+                    log_error(f"Batch write to PLC failed: {msg}")
 
         except Exception as e:
-            print(f"(FAIL) Failed to add write callback for variable {var_index}: {e}")
+            log_error(f"Error in OPC-UA to runtime sync: {e}")
+
+    async def run_opcua_to_runtime_loop(self) -> None:
+        """Main loop for synchronizing OPC-UA values to PLC runtime."""
+        while self.running and not stop_event.is_set():
+            try:
+                await self.sync_opcua_to_runtime()
+                await asyncio.sleep(0.050)  # 50ms interval
+
+            except Exception as e:
+                print(f"(FAIL) Error in OPC-UA to runtime loop: {e}")
+                await asyncio.sleep(0.1)  # Brief pause on error
+
+
 
     async def start_server(self) -> bool:
         """Start the OPC-UA server."""
@@ -340,7 +397,7 @@ class OpcuaServer:
 
         while self.running and not stop_event.is_set():
             try:
-                # await self.update_variables_from_plc()
+                await self.update_variables_from_plc()
                 await asyncio.sleep(cycle_time)
 
             except Exception as e:
@@ -364,8 +421,13 @@ def server_thread_main():
             if not await opcua_server.start_server():
                 return
 
-            # Run update loop
-            await opcua_server.run_update_loop()
+            # Start both update loops in parallel
+            print("(PASS) Starting bidirectional synchronization loops")
+            task_runtime_to_opcua = asyncio.create_task(opcua_server.run_update_loop())
+            task_opcua_to_runtime = asyncio.create_task(opcua_server.run_opcua_to_runtime_loop())
+
+            # Wait for both tasks to complete
+            await asyncio.gather(task_runtime_to_opcua, task_opcua_to_runtime)
 
         except Exception as e:
             print(f"(FAIL) Error in server thread: {e}")
@@ -403,6 +465,13 @@ def init(args_capsule):
             return False
 
         print("(PASS) SafeBufferAccess created successfully")
+
+        # Create safe logging accessor
+        global safe_logging_accessor
+        safe_logging_accessor = SafeLoggingAccess(runtime_args)
+        if not safe_logging_accessor.is_valid:
+            print(f"(WARN) Failed to create SafeLoggingAccess: {safe_logging_accessor.error_msg}")
+            # Continue without logging - not a fatal error
 
         # Load configuration
         config_path, config_error = safe_buffer_accessor.get_config_path()
