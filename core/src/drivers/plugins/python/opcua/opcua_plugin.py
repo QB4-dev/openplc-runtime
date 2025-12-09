@@ -131,7 +131,7 @@ class OpcuaServer:
                     print("(PASS) Server certificates loaded")
             else:
                 # No security - don't set any security policy
-                self.server.set_security_policy([])
+                self.server.set_security_policy([ua.SecurityPolicyType.NoSecurity])
                 print("(PASS) Server configured with no security")
 
             # Note: User authentication setup would go here if supported by asyncua
