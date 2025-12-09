@@ -3,14 +3,17 @@
         "name": "opcua_server",
         "protocol": "OPC-UA",
         "config": {
-            "endpoint": "opc.tcp://0.0.0.0:4840/freeopcua/server/",
-            "server_name": "OpenPLC OPC-UA Server",
+            "endpoint": "opc.tcp://localhost:4840/openplc/",
+            "server_name": "Autonomy Logic OpenPLC OPC-UA Server",
             "security_policy": "None",
             "security_mode": "None",
-            "certificate": "",
-            "private_key": "",
+            "client_auth": {
+                "enabled": false,
+                "trust_all_clients": false,
+                "trusted_certificates_pem": []
+            },
             "cycle_time_ms": 100,
-            "namespace": "OpenPLC",
+            "namespace": "AutonomyLogic",
             "variables": [
                 {
                     "node_name": "temperature",
@@ -63,6 +66,108 @@
                             "datatype": "Float",
                             "index": 6,
                             "access": "readwrite"
+                        }
+                    ]
+                },
+                {
+                    "node_name": "complex_data",
+                    "type": "STRUCT",
+                    "members": [
+                        {
+                            "name": "simple_field",
+                            "datatype": "Float",
+                            "index": 7,
+                            "access": "readwrite"
+                        },
+                        {
+                            "name": "nested_struct",
+                            "type": "STRUCT",
+                            "members": [
+                                {
+                                    "name": "field1",
+                                    "datatype": "Int",
+                                    "index": 8,
+                                    "access": "readwrite"
+                                },
+                                {
+                                    "name": "field2",
+                                    "datatype": "Bool",
+                                    "index": 9,
+                                    "access": "readonly"
+                                },
+                                {
+                                    "name": "deep_nested",
+                                    "type": "STRUCT",
+                                    "members": [
+                                        {
+                                            "name": "value",
+                                            "datatype": "Float",
+                                            "index": 10,
+                                            "access": "readwrite"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "name": "array_in_struct",
+                            "type": "ARRAY",
+                            "members": [
+                                {
+                                    "name": "[0]",
+                                    "datatype": "Int32",
+                                    "index": 11,
+                                    "access": "readwrite"
+                                },
+                                {
+                                    "name": "[1]",
+                                    "datatype": "Int32",
+                                    "index": 12,
+                                    "access": "readwrite"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "node_name": "struct_array",
+                    "type": "ARRAY",
+                    "members": [
+                        {
+                            "name": "[0]",
+                            "type": "STRUCT",
+                            "members": [
+                                {
+                                    "name": "x",
+                                    "datatype": "Float",
+                                    "index": 13,
+                                    "access": "readwrite"
+                                },
+                                {
+                                    "name": "y",
+                                    "datatype": "Float",
+                                    "index": 14,
+                                    "access": "readwrite"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "[1]",
+                            "type": "STRUCT",
+                            "members": [
+                                {
+                                    "name": "x",
+                                    "datatype": "Float",
+                                    "index": 15,
+                                    "access": "readwrite"
+                                },
+                                {
+                                    "name": "y",
+                                    "datatype": "Float",
+                                    "index": 16,
+                                    "access": "readwrite"
+                                }
+                            ]
                         }
                     ]
                 }

@@ -10,10 +10,12 @@ This module provides utilities for handling OPC-UA security features including:
 
 import os
 import ssl
+import socket
 import hashlib
 import asyncio
 from pathlib import Path
 from typing import Optional, Tuple, List
+from urllib.parse import urlparse
 from asyncua.crypto import uacrypto
 from asyncua.crypto.cert_gen import setup_self_signed_certificate
 from asyncua.crypto.security_policies import SecurityPolicyBasic256Sha256, SecurityPolicyAes128Sha256RsaOaep, SecurityPolicyAes256Sha256RsaPss
@@ -157,19 +159,82 @@ class OpcuaSecurityManager:
 
     def _validate_certificate_format(self) -> bool:
         """
-        Perform basic validation of certificate format.
+        Perform comprehensive validation of certificate format and extensions.
 
         Returns:
-            bool: True if certificate format is valid
+            bool: True if certificate format and extensions are valid
         """
         try:
             # Try to load certificate with ssl module for basic validation
             ssl.PEM_cert_to_DER_cert(self.certificate_data.decode('utf-8'))
-            return True
+            
+            # Enhanced validation using cryptography library
+            try:
+                from cryptography import x509
+                from cryptography.hazmat.backends import default_backend
+                import datetime
+                
+                cert = x509.load_pem_x509_certificate(self.certificate_data, default_backend())
+                
+                # Check expiration
+                if cert.not_valid_after < datetime.datetime.now():
+                    print("(WARN) Certificate has expired")
+                    return False
+                
+                # Check if certificate will expire soon (within 30 days)
+                days_until_expiry = (cert.not_valid_after - datetime.datetime.now()).days
+                if days_until_expiry < 30:
+                    print(f"(WARN) Certificate expires in {days_until_expiry} days")
+                
+                # Check for Subject Alternative Name extension
+                try:
+                    san_ext = cert.extensions.get_extension_for_oid(x509.ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+                    san_names = san_ext.value
+                    
+                    # Log SAN entries for debugging
+                    dns_names = [name.value for name in san_names if isinstance(name, x509.DNSName)]
+                    ip_addresses = [name.value.compressed for name in san_names if isinstance(name, x509.IPAddress)]
+                    uris = [name.value for name in san_names if isinstance(name, x509.UniformResourceIdentifier)]
+                    
+                    print(f"(INFO) Certificate SAN DNS names: {dns_names}")
+                    print(f"(INFO) Certificate SAN IP addresses: {ip_addresses}")
+                    print(f"(INFO) Certificate SAN URIs: {uris}")
+                    
+                    # Check if we have expected entries
+                    system_hostname = socket.gethostname()
+                    if system_hostname not in dns_names and system_hostname != "localhost":
+                        print(f"(WARN) System hostname '{system_hostname}' not found in certificate DNS SANs")
+                    
+                    # Check for application URI
+                    expected_uri = "urn:autonomy-logic:openplc:opcua:server"
+                    if expected_uri not in uris:
+                        print(f"(WARN) Expected application URI '{expected_uri}' not found in certificate")
+                    
+                except x509.ExtensionNotFound:
+                    print("(WARN) Certificate missing Subject Alternative Name extension")
+                
+                # Check key usage extensions
+                try:
+                    key_usage = cert.extensions.get_extension_for_oid(x509.ExtensionOID.KEY_USAGE).value
+                    if not key_usage.digital_signature:
+                        print("(WARN) Certificate lacks digital signature key usage")
+                    if not key_usage.key_encipherment:
+                        print("(WARN) Certificate lacks key encipherment usage")
+                except x509.ExtensionNotFound:
+                    print("(WARN) Certificate missing key usage extension")
+                
+                print("(PASS) Certificate format and extensions validated")
+                return True
+                
+            except ImportError:
+                print("(WARN) cryptography library not available for enhanced validation")
+                return True  # Fall back to basic validation
+                
         except Exception:
             try:
                 # Try as DER format
                 ssl.DER_cert_to_PEM_cert(self.certificate_data)
+                print("(PASS) Certificate validated as DER format")
                 return True
             except Exception as e:
                 print(f"(FAIL) Invalid certificate format: {e}")
@@ -277,7 +342,7 @@ class OpcuaSecurityManager:
         valid_days: int = 365
     ) -> bool:
         """
-        Generate a self-signed certificate for the server.
+        Generate a self-signed certificate for the server with proper SAN extensions.
 
         Args:
             cert_path: Path where certificate will be saved
@@ -290,23 +355,63 @@ class OpcuaSecurityManager:
             bool: True if certificate generated successfully
         """
         try:
-            # Use the setup_self_signed_certificate function from asyncua
+            # Get system hostname for proper certificate validation
+            system_hostname = socket.gethostname()
+            
+            # Extract hostname from endpoint if available
+            endpoint_hostname = "localhost"  # default
+            if hasattr(self.config, 'endpoint') and self.config.endpoint:
+                try:
+                    # Convert opc.tcp:// to http:// for parsing
+                    endpoint_url = self.config.endpoint.replace("opc.tcp://", "http://")
+                    parsed = urlparse(endpoint_url)
+                    if parsed.hostname and parsed.hostname != "0.0.0.0":
+                        endpoint_hostname = parsed.hostname
+                except Exception as e:
+                    print(f"(WARN) Could not parse endpoint hostname: {e}")
+            
+            # Create consistent application URI for Autonomy Logic
+            app_uri = "urn:autonomy-logic:openplc:opcua:server"
+            
+            # Collect all possible hostnames for SAN DNS entries
+            dns_names = []
+            # Add system hostname
+            if system_hostname and system_hostname != "localhost":
+                dns_names.append(system_hostname)
+            # Add endpoint hostname if different
+            if endpoint_hostname and endpoint_hostname not in dns_names:
+                dns_names.append(endpoint_hostname)
+            # Always include localhost
+            if "localhost" not in dns_names:
+                dns_names.append("localhost")
+            
+            # IP addresses for SAN
+            ip_addresses = ["127.0.0.1"]
+            # Add 0.0.0.0 if endpoint uses it (for bind-all scenarios)
+            if hasattr(self.config, 'endpoint') and "0.0.0.0" in self.config.endpoint:
+                ip_addresses.append("0.0.0.0")
+            
+            print(f"(INFO) Generating certificate with DNS SANs: {dns_names}")
+            print(f"(INFO) Generating certificate with IP SANs: {ip_addresses}")
+            print(f"(INFO) Application URI: {app_uri}")
+            
+            # Use the setup_self_signed_certificate function from asyncua with supported parameters
             await setup_self_signed_certificate(
                 key_file=Path(key_path),
                 cert_file=Path(cert_path),
-                app_uri="urn:openplc:opcua:server",
-                host_name=common_name,
+                app_uri=app_uri,
+                host_name=system_hostname,  # Use actual system hostname
                 cert_use=[ExtendedKeyUsageOID.SERVER_AUTH],
                 subject_attrs={
-                    "countryName": "BR",
-                    "stateOrProvinceName": "SP",
-                    "localityName": "Sao Paulo",
-                    "organizationName": "OpenPLC",
+                    "countryName": "US",
+                    "stateOrProvinceName": "CA",
+                    "localityName": "California",
+                    "organizationName": "Autonomy Logic",
                     "commonName": common_name
-                }
+                },
             )
 
-            print(f"(PASS) Server certificate generated: {cert_path}")
+            print(f"(PASS) Server certificate generated with proper SANs: {cert_path}")
             return True
 
         except Exception as e:

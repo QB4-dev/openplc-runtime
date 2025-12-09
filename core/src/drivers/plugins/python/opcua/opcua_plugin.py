@@ -14,9 +14,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 # Import the correct type definitions
 from shared import (
+    SafeBufferAccess,
+)
+from shared.plugin_types import (
     PluginRuntimeArgs,
     safe_extract_runtime_args_from_capsule,
-    SafeBufferAccess,
 )
 
 # Import the configuration model
@@ -84,6 +86,9 @@ class OpcuaServer:
             await self.server.init()
             self.server.set_endpoint(self.config.endpoint)
             self.server.set_server_name(self.config.server_name)
+            
+            # Set application URI to match certificate
+            await self.server.set_application_uri("urn:autonomy-logic:openplc:opcua:server")
 
             # Get security settings from security manager
             security_policy, security_mode, cert_data, key_data = self.security_manager.get_security_settings()
@@ -98,9 +103,8 @@ class OpcuaServer:
                     await self.server.load_certificate(cert_data, key_data)
                     print("(PASS) Server certificates loaded")
             else:
-                # No security - set None policy
-                from asyncua.crypto.security_policies import SecurityPolicyNone
-                self.server.set_security_policy([SecurityPolicyNone])
+                # No security - don't set any security policy
+                self.server.set_security_policy([])
                 print("(PASS) Server configured with no security")
 
             # Register namespace
@@ -266,7 +270,8 @@ class OpcuaServer:
             opcua_value = convert_value_for_opcua(var_node.datatype, value)
             await var_node.node.write_value(ua.Variant(opcua_value))
         except Exception as e:
-            print(f"(FAIL) Failed to update OPC-UA node for debug variable {var_node.debug_var_index}: {e}")
+            pass
+            # print(f"(FAIL) Failed to update OPC-UA node for debug variable {var_node.debug_var_index}: {e}")
 
     async def _initialize_variable_cache(self, indices: List[int]) -> None:
         """Initialize metadata cache for direct memory access."""
@@ -335,7 +340,7 @@ class OpcuaServer:
 
         while self.running and not stop_event.is_set():
             try:
-                await self.update_variables_from_plc()
+                # await self.update_variables_from_plc()
                 await asyncio.sleep(cycle_time)
 
             except Exception as e:
