@@ -16,6 +16,7 @@ from webserver.plcapp_management import (
     build_state,
     run_compile,
     safe_extract,
+    update_plugin_configurations,
 )
 from webserver.restapi import (
     app_restapi,
@@ -152,6 +153,9 @@ def handle_upload_file(data: dict) -> dict:
             shutil.rmtree(extract_dir)
 
         safe_extract(zip_file, extract_dir, valid_files)
+
+        # Update plugin configurations based on extracted config files
+        update_plugin_configurations(extract_dir)
 
         # Start compilation in a separate thread
         build_state.status = BuildStatus.COMPILING

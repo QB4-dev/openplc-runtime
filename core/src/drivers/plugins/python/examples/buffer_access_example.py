@@ -7,12 +7,12 @@ This example shows how to use all the new read functions and batch operations fo
 import sys
 import os
 
-# Add the shared directory to the Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
+# Add the parent directory to Python path to find shared module
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from python_plugin_types import (
-    PluginRuntimeArgs, 
-    SafeBufferAccess, 
+from shared import (
+    PluginRuntimeArgs,
+    SafeBufferAccess,
     safe_extract_runtime_args_from_capsule,
     PluginStructureValidator
 )

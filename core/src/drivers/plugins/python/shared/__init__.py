@@ -8,12 +8,14 @@ buffer access utilities, configuration handling, and type definitions.
 # Core buffer access functionality (refactored modular architecture)
 from .safe_buffer_access_refactored import SafeBufferAccess
 
-# Legacy compatibility - import from original implementation if needed
-from .python_plugin_types import (
-    PluginRuntimeArgs,
-    PluginStructureValidator,
-    safe_extract_runtime_args_from_capsule
-)
+# Safe logging access functionality
+from .safe_logging_access import SafeLoggingAccess
+
+# Core type definitions
+from .iec_types import IEC_BOOL, IEC_BYTE, IEC_UINT, IEC_UDINT, IEC_ULINT
+from .plugin_runtime_args import PluginRuntimeArgs
+from .plugin_structure_validator import PluginStructureValidator
+from .capsule_extraction import safe_extract_runtime_args_from_capsule
 
 # Configuration models
 from .plugin_config_decode.plugin_config_contact import PluginConfigContract, PluginConfigError
@@ -29,7 +31,13 @@ __all__ = [
     # Core buffer access (refactored)
     'SafeBufferAccess',
 
-    # Legacy type definitions (maintained for compatibility)
+    # Safe logging access functionality
+    'SafeLoggingAccess',
+
+    # IEC type definitions
+    'IEC_BOOL', 'IEC_BYTE', 'IEC_UINT', 'IEC_UDINT', 'IEC_ULINT',
+
+    # Core type definitions
     'PluginRuntimeArgs',
     'PluginStructureValidator',
     'safe_extract_runtime_args_from_capsule',

@@ -68,16 +68,24 @@ int parse_plugin_config(const char *config_file, plugin_config_t *configs, int m
             continue;
         configs[config_count].type = atoi(token);
 
-        // parsing plugin_related_config_path
+        // parsing plugin_related_config_path (optional field)
         token = strtok(NULL, ",");
-        if (!token)
-            continue;
-        strncpy(configs[config_count].plugin_related_config_path, token,
-                sizeof(configs[config_count].plugin_related_config_path) - 1);
-        configs[config_count]
-            .plugin_related_config_path[sizeof(configs[config_count].plugin_related_config_path) -
-                                        1] = '\0';
-        remove_newline(configs[config_count].plugin_related_config_path);
+        if (token && strlen(token) > 0)
+        {
+            printf("[PLUGIN_CONFIG]: Found config_path: '%s'\n", token);
+            strncpy(configs[config_count].plugin_related_config_path, token,
+                    sizeof(configs[config_count].plugin_related_config_path) - 1);
+            configs[config_count]
+                .plugin_related_config_path[sizeof(configs[config_count].plugin_related_config_path) -
+                                            1] = '\0';
+            remove_newline(configs[config_count].plugin_related_config_path);
+        }
+        else
+        {
+            printf("[PLUGIN_CONFIG]: No config_path found, using empty string\n");
+            // No config path specified, use empty string
+            configs[config_count].plugin_related_config_path[0] = '\0';
+        }
 
         // parsing venv_path (optional field)
         token = strtok(NULL, ",\n\r");

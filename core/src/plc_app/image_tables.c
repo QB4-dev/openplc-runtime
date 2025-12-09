@@ -44,7 +44,6 @@ void (*ext_setBufferPointers)(
     IEC_UINT *int_memory[BUFFER_SIZE], IEC_UDINT *dint_memory[BUFFER_SIZE],
     IEC_ULINT *lint_memory[BUFFER_SIZE]);
 
-
 // Debug
 void (*ext_set_endianness)(uint8_t value);
 uint16_t (*ext_get_var_count)(void);
@@ -52,8 +51,7 @@ size_t (*ext_get_var_size)(size_t idx);
 void *(*ext_get_var_addr)(size_t idx);
 void (*ext_set_trace)(size_t idx, bool forced, void *val);
 
-
-int symbols_init(PluginManager *pm) 
+int symbols_init(PluginManager *pm)
 {
     // Get pointer to external functions
     *(void **)(&ext_config_run__) =
@@ -62,8 +60,7 @@ int symbols_init(PluginManager *pm)
     *(void **)(&ext_config_init__) =
         plugin_manager_get_func(pm, void (*)(unsigned long), "config_init__");
 
-    *(void **)(&ext_glueVars) =
-        plugin_manager_get_func(pm, void (*)(unsigned long), "glueVars");
+    *(void **)(&ext_glueVars) = plugin_manager_get_func(pm, void (*)(unsigned long), "glueVars");
 
     *(void **)(&ext_updateTime) =
         plugin_manager_get_func(pm, void (*)(unsigned long), "updateTime");
@@ -83,30 +80,291 @@ int symbols_init(PluginManager *pm)
     *(void **)(&ext_get_var_count) =
         plugin_manager_get_func(pm, uint16_t (*)(uint16_t), "get_var_count");
 
-    *(void **)(&ext_get_var_size) =
-        plugin_manager_get_func(pm, size_t (*)(size_t), "get_var_size");
+    *(void **)(&ext_get_var_size) = plugin_manager_get_func(pm, size_t (*)(size_t), "get_var_size");
 
     *(void **)(&ext_get_var_addr) =
         plugin_manager_get_func(pm, void *(*)(unsigned long), "get_var_addr");
 
-    *(void **)(&ext_set_trace) =
-        plugin_manager_get_func(pm, void (*)(unsigned long), "set_trace");
+    *(void **)(&ext_set_trace) = plugin_manager_get_func(pm, void (*)(unsigned long), "set_trace");
 
     // Check if all symbols were loaded successfully
-    if (!ext_config_run__ || !ext_config_init__ || !ext_glueVars ||
-        !ext_updateTime || !ext_setBufferPointers || !ext_common_ticktime__ ||
-        !ext_plc_program_md5 || !ext_set_endianness || !ext_get_var_count || 
-        !ext_get_var_size || !ext_get_var_addr || !ext_set_trace) 
+    if (!ext_config_run__ || !ext_config_init__ || !ext_glueVars || !ext_updateTime ||
+        !ext_setBufferPointers || !ext_common_ticktime__ || !ext_plc_program_md5 ||
+        !ext_set_endianness || !ext_get_var_count || !ext_get_var_size || !ext_get_var_addr ||
+        !ext_set_trace)
     {
         log_error("Failed to load all symbols");
         return -1;
     }
 
     // Send buffer pointers to .so
-    ext_setBufferPointers(bool_input, bool_output, byte_input, byte_output,
-                            int_input, int_output, dint_input, dint_output,
-                            lint_input, lint_output, int_memory, dint_memory,
-                            lint_memory);
+    ext_setBufferPointers(bool_input, bool_output, byte_input, byte_output, int_input, int_output,
+                          dint_input, dint_output, lint_input, lint_output, int_memory, dint_memory,
+                          lint_memory);
 
     return 0;
+}
+
+// Static backing arrays for NULL pointer fill
+// These provide temporary storage for image table entries not used by the PLC program
+static IEC_BOOL temp_bool_input[BUFFER_SIZE][8];
+static IEC_BOOL temp_bool_output[BUFFER_SIZE][8];
+static IEC_BYTE temp_byte_input[BUFFER_SIZE];
+static IEC_BYTE temp_byte_output[BUFFER_SIZE];
+static IEC_UINT temp_int_input[BUFFER_SIZE];
+static IEC_UINT temp_int_output[BUFFER_SIZE];
+static IEC_UDINT temp_dint_input[BUFFER_SIZE];
+static IEC_UDINT temp_dint_output[BUFFER_SIZE];
+static IEC_ULINT temp_lint_input[BUFFER_SIZE];
+static IEC_ULINT temp_lint_output[BUFFER_SIZE];
+static IEC_UINT temp_int_memory[BUFFER_SIZE];
+static IEC_UDINT temp_dint_memory[BUFFER_SIZE];
+static IEC_ULINT temp_lint_memory[BUFFER_SIZE];
+
+void image_tables_fill_null_pointers(void)
+{
+    int filled_count = 0;
+
+    // Fill boolean input pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        for (int b = 0; b < 8; b++)
+        {
+            if (bool_input[i][b] == NULL)
+            {
+                temp_bool_input[i][b] = 0;
+                bool_input[i][b]      = &temp_bool_input[i][b];
+                filled_count++;
+            }
+        }
+    }
+
+    // Fill boolean output pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        for (int b = 0; b < 8; b++)
+        {
+            if (bool_output[i][b] == NULL)
+            {
+                temp_bool_output[i][b] = 0;
+                bool_output[i][b]      = &temp_bool_output[i][b];
+                filled_count++;
+            }
+        }
+    }
+
+    // Fill byte input pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (byte_input[i] == NULL)
+        {
+            temp_byte_input[i] = 0;
+            byte_input[i]      = &temp_byte_input[i];
+            filled_count++;
+        }
+    }
+
+    // Fill byte output pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (byte_output[i] == NULL)
+        {
+            temp_byte_output[i] = 0;
+            byte_output[i]      = &temp_byte_output[i];
+            filled_count++;
+        }
+    }
+
+    // Fill int input pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (int_input[i] == NULL)
+        {
+            temp_int_input[i] = 0;
+            int_input[i]      = &temp_int_input[i];
+            filled_count++;
+        }
+    }
+
+    // Fill int output pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (int_output[i] == NULL)
+        {
+            temp_int_output[i] = 0;
+            int_output[i]      = &temp_int_output[i];
+            filled_count++;
+        }
+    }
+
+    // Fill dint input pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (dint_input[i] == NULL)
+        {
+            temp_dint_input[i] = 0;
+            dint_input[i]      = &temp_dint_input[i];
+            filled_count++;
+        }
+    }
+
+    // Fill dint output pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (dint_output[i] == NULL)
+        {
+            temp_dint_output[i] = 0;
+            dint_output[i]      = &temp_dint_output[i];
+            filled_count++;
+        }
+    }
+
+    // Fill lint input pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (lint_input[i] == NULL)
+        {
+            temp_lint_input[i] = 0;
+            lint_input[i]      = &temp_lint_input[i];
+            filled_count++;
+        }
+    }
+
+    // Fill lint output pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (lint_output[i] == NULL)
+        {
+            temp_lint_output[i] = 0;
+            lint_output[i]      = &temp_lint_output[i];
+            filled_count++;
+        }
+    }
+
+    // Fill int memory pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (int_memory[i] == NULL)
+        {
+            temp_int_memory[i] = 0;
+            int_memory[i]      = &temp_int_memory[i];
+            filled_count++;
+        }
+    }
+
+    // Fill dint memory pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (dint_memory[i] == NULL)
+        {
+            temp_dint_memory[i] = 0;
+            dint_memory[i]      = &temp_dint_memory[i];
+            filled_count++;
+        }
+    }
+
+    // Fill lint memory pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (lint_memory[i] == NULL)
+        {
+            temp_lint_memory[i] = 0;
+            lint_memory[i]      = &temp_lint_memory[i];
+            filled_count++;
+        }
+    }
+
+    log_info("Filled %d NULL pointers in image tables with temporary buffers", filled_count);
+}
+
+void image_tables_clear_null_pointers(void)
+{
+    // Clear all pointers in image tables
+    // All pointers will be remapped when a new program is loaded via glueVars()
+
+    // Clear boolean input pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        for (int b = 0; b < 8; b++)
+        {
+            bool_input[i][b] = NULL;
+        }
+    }
+
+    // Clear boolean output pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        for (int b = 0; b < 8; b++)
+        {
+            bool_output[i][b] = NULL;
+        }
+    }
+
+    // Clear byte input pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        byte_input[i] = NULL;
+    }
+
+    // Clear byte output pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        byte_output[i] = NULL;
+    }
+
+    // Clear int input pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        int_input[i] = NULL;
+    }
+
+    // Clear int output pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        int_output[i] = NULL;
+    }
+
+    // Clear dint input pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        dint_input[i] = NULL;
+    }
+
+    // Clear dint output pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        dint_output[i] = NULL;
+    }
+
+    // Clear lint input pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        lint_input[i] = NULL;
+    }
+
+    // Clear lint output pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        lint_output[i] = NULL;
+    }
+
+    // Clear int memory pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        int_memory[i] = NULL;
+    }
+
+    // Clear dint memory pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        dint_memory[i] = NULL;
+    }
+
+    // Clear lint memory pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        lint_memory[i] = NULL;
+    }
+
+    log_info("Cleared all pointers in image tables");
 }

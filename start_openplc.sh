@@ -110,56 +110,30 @@ get_enabled_plugins() {
 setup_plugin_venvs() {
     local plugins_dir="$OPENPLC_DIR/core/src/drivers/plugins/python"
     local manage_script="$OPENPLC_DIR/scripts/manage_plugin_venvs.sh"
-    
+
     log_info "Checking for plugins that need virtual environments..."
-    
+
     # Check if plugins directory exists
     if [ ! -d "$plugins_dir" ]; then
         log_warning "Plugins directory not found: $plugins_dir"
         return 0
     fi
-    
-    # Get enabled plugins from plugins.conf
-    local enabled_plugins=()
-    while IFS= read -r plugin_name; do
-        [[ -n "$plugin_name" ]] && enabled_plugins+=("$plugin_name")
-    done < <(get_enabled_plugins)
-    
-    if [ ${#enabled_plugins[@]} -eq 0 ]; then
-        log_info "No enabled plugins found in plugins.conf"
-        return 0
-    fi
-    
-    log_info "Enabled plugins: ${enabled_plugins[*]}"
-    
-    # Find directories with requirements.txt, but only for enabled plugins
+
+    # Find directories with requirements.txt for all plugins (regardless of enabled status)
     local plugins_with_requirements=()
     while IFS= read -r -d '' requirements_file; do
         # Get the directory name (plugin name)
         local plugin_dir=$(dirname "$requirements_file")
         local plugin_name=$(basename "$plugin_dir")
-        
+
         # Skip if it's in examples or shared directories (common libraries)
         if [[ "$plugin_dir" == *"/examples/"* ]] || [[ "$plugin_dir" == *"/shared/"* ]]; then
             log_info "Skipping $plugin_name (in examples/shared directory)"
             continue
         fi
-        
-        # Check if this plugin is enabled in plugins.conf
-        local is_enabled=false
-        for enabled_plugin in "${enabled_plugins[@]}"; do
-            if [[ "$plugin_name" == "$enabled_plugin" ]]; then
-                is_enabled=true
-                break
-            fi
-        done
-        
-        if [[ "$is_enabled" == "true" ]]; then
-            plugins_with_requirements+=("$plugin_name")
-            log_info "Found enabled plugin with requirements: $plugin_name"
-        else
-            log_info "Skipping $plugin_name (not enabled in plugins.conf)"
-        fi
+
+        plugins_with_requirements+=("$plugin_name")
+        log_info "Found plugin with requirements: $plugin_name"
     done < <(find "$plugins_dir" -name "requirements.txt" -type f -print0)
     
     # If no plugins found, return

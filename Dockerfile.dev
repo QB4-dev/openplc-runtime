@@ -16,4 +16,4 @@ RUN ./install.sh
 
 EXPOSE 8443
 
-CMD ["bash", "./scripts/setup-tests-env.sh"]
+CMD ["bash", "./scripts/run-pytest.sh"]

@@ -72,7 +72,6 @@ class ModbusDeviceConfig:
         self.type: str = "SLAVE"
         self.host: str = "127.0.0.1"
         self.port: int = 502
-        self.cycle_time_ms: int = 1000
         self.timeout_ms: int = 1000
         self.io_points: List['ModbusIoPointConfig'] = []
 
@@ -84,22 +83,21 @@ class ModbusDeviceConfig:
         device = cls()
         device.name = data.get("name", "UNDEFINED")
         device.protocol = data.get("protocol", "MODBUS")
-        
+
         config = data.get("config", {})
         device.type = config.get("type", "SLAVE")
         device.host = config.get("host", "127.0.0.1")
         device.port = config.get("port", 502)
-        device.cycle_time_ms = config.get("cycle_time_ms", 1000)
         device.timeout_ms = config.get("timeout_ms", 1000)
-        
+
         # Parse I/O points
         io_points_data = config.get("io_points", [])
         device.io_points = []
-        
+
         for point in io_points_data:
             modbus_point = ModbusIoPointConfig.from_dict(data=point)
             device.io_points.append(modbus_point)
-            
+
         return device
 
     def validate(self) -> None:
@@ -110,11 +108,9 @@ class ModbusDeviceConfig:
             raise ValueError(f"Invalid protocol: {self.protocol}. Expected 'MODBUS' for device {self.name}.")
         if not isinstance(self.port, int) or self.port <= 0:
             raise ValueError(f"Invalid port: {self.port}. Must be a positive integer for device {self.name}.")
-        if not isinstance(self.cycle_time_ms, int) or self.cycle_time_ms <= 0:
-            raise ValueError(f"Invalid cycle_time_ms: {self.cycle_time_ms}. Must be a positive integer for device {self.name}.")
         if not isinstance(self.timeout_ms, int) or self.timeout_ms <= 0:
             raise ValueError(f"Invalid timeout_ms: {self.timeout_ms}. Must be a positive integer for device {self.name}.")
-        
+
         for i, point in enumerate(self.io_points):
             if not isinstance(point, ModbusIoPointConfig):
                 raise ValueError(f"Invalid I/O point {i}: {point}. Must be an instance of ModbusIoPointConfig for device {self.name}.")
@@ -126,6 +122,8 @@ class ModbusDeviceConfig:
                 raise ValueError(f"Invalid IEC location: {point.iec_location}. Must be an IECAddress object for device {self.name}, point {i}.")
             if not isinstance(point.length, int) or point.length <= 0:
                 raise ValueError(f"Invalid length: {point.length}. Must be a positive integer for device {self.name}, point {i}.")
+            if not isinstance(point.cycle_time_ms, int) or point.cycle_time_ms <= 0:
+                raise ValueError(f"Invalid cycle_time_ms: {point.cycle_time_ms}. Must be a positive integer for device {self.name}, point {i}.")
 
     def __repr__(self) -> str:
         return f"ModbusDeviceConfig(name='{self.name}', host='{self.host}', port={self.port}, io_points={len(self.io_points)})"
@@ -191,11 +189,12 @@ class ModbusIoPointConfig:
     """
     Model for a single Modbus I/O point configuration.
     """
-    def __init__(self, fc: int, offset: str, iec_location: str, length: int):
+    def __init__(self, fc: int, offset: str, iec_location: str, length: int, cycle_time_ms: int = 1000):
         self.fc = fc  # Function code
         self.offset = offset  # Modbus register offset
         self.iec_location: IECAddress = parse_iec_address(iec_location)  # IEC location (as IECAddress)
         self.length = length  # Length of the data
+        self.cycle_time_ms = cycle_time_ms  # Polling cycle time in milliseconds
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ModbusIoPointConfig':
@@ -207,10 +206,11 @@ class ModbusIoPointConfig:
             offset = data["offset"]
             iec_location = data["iec_location"]
             length = data["len"]
+            cycle_time_ms = data.get("cycle_time_ms", 1000)
         except KeyError as e:
             raise ValueError(f"Missing required field in Modbus I/O point config: {e}")
 
-        return cls(fc=fc, offset=offset, iec_location=iec_location, length=length)
+        return cls(fc=fc, offset=offset, iec_location=iec_location, length=length, cycle_time_ms=cycle_time_ms)
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -220,12 +220,13 @@ class ModbusIoPointConfig:
         iec_str = f"%{self.iec_location.area}{self.iec_location.size}{self.iec_location.byte}"
         if self.iec_location.bit is not None:
             iec_str += f".{self.iec_location.bit}"
-            
+
         return {
             "fc": self.fc,
             "offset": self.offset,
             "iec_location": iec_str,
-            "len": self.length
+            "len": self.length,
+            "cycle_time_ms": self.cycle_time_ms
         }
 
     def __repr__(self) -> str:
