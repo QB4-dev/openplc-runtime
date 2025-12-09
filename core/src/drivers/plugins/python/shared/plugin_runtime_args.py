@@ -39,6 +39,9 @@ class PluginRuntimeArgs(ctypes.Structure):
         # Mutex function pointers
         ("mutex_take", ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)),
         ("mutex_give", ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)),
+        ("get_var_list", ctypes.CFUNCTYPE(None, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(ctypes.c_void_p))),
+        ("get_var_size", ctypes.CFUNCTYPE(ctypes.c_size_t, ctypes.c_size_t)),
+        ("get_var_count", ctypes.CFUNCTYPE(ctypes.c_uint16)),
         ("buffer_mutex", ctypes.c_void_p),
         ("plugin_specific_config_file_path", ctypes.c_char * 256),
 
