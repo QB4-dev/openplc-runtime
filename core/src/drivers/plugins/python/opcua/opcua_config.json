@@ -3,175 +3,176 @@
         "name": "opcua_server",
         "protocol": "OPC-UA",
         "config": {
-            "endpoint": "opc.tcp://localhost:4840/openplc/",
-            "server_name": "Autonomy Logic OpenPLC OPC-UA Server",
-            "security_policy": "None",
-            "security_mode": "None",
-            "client_auth": {
-                "enabled": false,
-                "trust_all_clients": false,
-                "trusted_certificates_pem": []
+            "server": {
+                "name": "OpenPLC OPC UA Server",
+                "application_uri": "urn:openplc:runtime:opcua",
+                "product_uri": "urn:openplc:runtime:product",
+                "endpoint_url": "opc.tcp://0.0.0.0:4840/openplc/opcua",
+                "security_profiles": [
+                    {
+                        "name": "insecure",
+                        "enabled": true,
+                        "security_policy": "None",
+                        "security_mode": "None",
+                        "auth_methods": [
+                            "Anonymous"
+                        ]
+                    },
+                    {
+                        "name": "signed",
+                        "enabled": true,
+                        "security_policy": "Basic256Sha256",
+                        "security_mode": "Sign",
+                        "auth_methods": [
+                            "Username",
+                            "Certificate"
+                        ]
+                    },
+                    {
+                        "name": "signed_encrypted",
+                        "enabled": true,
+                        "security_policy": "Basic256Sha256",
+                        "security_mode": "SignAndEncrypt",
+                        "auth_methods": [
+                            "Username",
+                            "Certificate"
+                        ]
+                    }
+                ]
             },
-            "cycle_time_ms": 100,
-            "namespace": "AutonomyLogic",
-            "variables": [
+            "security": {
+                "server_certificate_strategy": "auto_self_signed",
+                "server_certificate_custom": null,
+                "server_private_key_custom": null,
+                "trusted_client_certificates": [
+                    {
+                        "id": "engineer_client",
+                        "pem": "-----BEGIN CERTIFICATE-----\nMIIC...snip...\n-----END CERTIFICATE-----\n"
+                    },
+                    {
+                        "id": "scada_client",
+                        "pem": "-----BEGIN CERTIFICATE-----\nMIIC...snip...\n-----END CERTIFICATE-----\n"
+                    }
+                ]
+            },
+            "users": [
                 {
-                    "node_name": "temperature",
-                    "datatype": "Float",
-                    "index": 0,
-                    "access": "readwrite"
+                    "type": "password",
+                    "username": "viewer",
+                    "password_hash": "$2b$12$aa...",
+                    "role": "viewer"
                 },
                 {
-                    "node_name": "status",
-                    "datatype": "Bool",
-                    "index": 1,
-                    "access": "readonly"
+                    "type": "password",
+                    "username": "operator",
+                    "password_hash": "$2b$12$bb...",
+                    "role": "operator"
                 },
                 {
-                    "node_name": "person",
-                    "type": "STRUCT",
-                    "members": [
-                        {
-                            "name": "name",
-                            "datatype": "String",
-                            "index": 2,
-                            "access": "readwrite"
-                        },
-                        {
-                            "name": "age",
-                            "datatype": "Int32",
-                            "index": 3,
-                            "access": "readwrite"
-                        }
-                    ]
+                    "type": "password",
+                    "username": "engineer",
+                    "password_hash": "$2b$12$cc...",
+                    "role": "engineer"
                 },
                 {
-                    "node_name": "sensor_values",
-                    "type": "ARRAY",
-                    "members": [
-                        {
-                            "name": "[0]",
-                            "datatype": "Float",
-                            "index": 4,
-                            "access": "readwrite"
-                        },
-                        {
-                            "name": "[1]",
-                            "datatype": "Float",
-                            "index": 5,
-                            "access": "readwrite"
-                        },
-                        {
-                            "name": "[2]",
-                            "datatype": "Float",
-                            "index": 6,
-                            "access": "readwrite"
-                        }
-                    ]
-                },
-                {
-                    "node_name": "complex_data",
-                    "type": "STRUCT",
-                    "members": [
-                        {
-                            "name": "simple_field",
-                            "datatype": "Float",
-                            "index": 7,
-                            "access": "readwrite"
-                        },
-                        {
-                            "name": "nested_struct",
-                            "type": "STRUCT",
-                            "members": [
-                                {
-                                    "name": "field1",
-                                    "datatype": "Int",
-                                    "index": 8,
-                                    "access": "readwrite"
-                                },
-                                {
-                                    "name": "field2",
-                                    "datatype": "Bool",
-                                    "index": 9,
-                                    "access": "readonly"
-                                },
-                                {
-                                    "name": "deep_nested",
-                                    "type": "STRUCT",
-                                    "members": [
-                                        {
-                                            "name": "value",
-                                            "datatype": "Float",
-                                            "index": 10,
-                                            "access": "readwrite"
-                                        }
-                                    ]
-                                }
-                            ]
-                        },
-                        {
-                            "name": "array_in_struct",
-                            "type": "ARRAY",
-                            "members": [
-                                {
-                                    "name": "[0]",
-                                    "datatype": "Int32",
-                                    "index": 11,
-                                    "access": "readwrite"
-                                },
-                                {
-                                    "name": "[1]",
-                                    "datatype": "Int32",
-                                    "index": 12,
-                                    "access": "readwrite"
-                                }
-                            ]
-                        }
-                    ]
-                },
-                {
-                    "node_name": "struct_array",
-                    "type": "ARRAY",
-                    "members": [
-                        {
-                            "name": "[0]",
-                            "type": "STRUCT",
-                            "members": [
-                                {
-                                    "name": "x",
-                                    "datatype": "Float",
-                                    "index": 13,
-                                    "access": "readwrite"
-                                },
-                                {
-                                    "name": "y",
-                                    "datatype": "Float",
-                                    "index": 14,
-                                    "access": "readwrite"
-                                }
-                            ]
-                        },
-                        {
-                            "name": "[1]",
-                            "type": "STRUCT",
-                            "members": [
-                                {
-                                    "name": "x",
-                                    "datatype": "Float",
-                                    "index": 15,
-                                    "access": "readwrite"
-                                },
-                                {
-                                    "name": "y",
-                                    "datatype": "Float",
-                                    "index": 16,
-                                    "access": "readwrite"
-                                }
-                            ]
-                        }
-                    ]
+                    "type": "certificate",
+                    "certificate_id": "engineer_client",
+                    "role": "engineer"
                 }
-            ]
+            ],
+            "address_space": {
+                "namespace_uri": "urn:openplc:opcua:runtime",
+                "namespace_index": 2,
+                "variables": [
+                    {
+                        "node_id": "PLC.Inputs.Sensor1",
+                        "browse_name": "Sensor1",
+                        "display_name": "Digital Input Sensor1",
+                        "datatype": "BOOL",
+                        "initial_value": false,
+                        "description": "Estado do sensor 1",
+                        "index": 12,
+                        "permissions": {
+                            "viewer": "r",
+                            "operator": "r",
+                            "engineer": "rw"
+                        }
+                    },
+                    {
+                        "node_id": "PLC.Outputs.Motor1",
+                        "browse_name": "Motor1",
+                        "display_name": "Motor 1",
+                        "datatype": "BOOL",
+                        "initial_value": false,
+                        "description": "Comando de saída para motor 1",
+                        "index": 21,
+                        "permissions": {
+                            "viewer": "r",
+                            "operator": "rw",
+                            "engineer": "rw"
+                        }
+                    }
+                ],
+                "structures": [
+                    {
+                        "node_id": "PLC.Structs.DriveStatus",
+                        "browse_name": "DriveStatus",
+                        "display_name": "Drive Status",
+                        "description": "Estado completo do inversor",
+                        "fields": [
+                            {
+                                "name": "Speed",
+                                "datatype": "REAL",
+                                "initial_value": 0.0,
+                                "index": 33,
+                                "permissions": {
+                                    "viewer": "r",
+                                    "operator": "r",
+                                    "engineer": "rw"
+                                }
+                            },
+                            {
+                                "name": "Torque",
+                                "datatype": "REAL",
+                                "initial_value": 0.0,
+                                "index": 34,
+                                "permissions": {
+                                    "viewer": "r",
+                                    "operator": "r",
+                                    "engineer": "rw"
+                                }
+                            },
+                            {
+                                "name": "Alarm",
+                                "datatype": "BOOL",
+                                "initial_value": false,
+                                "index": 35,
+                                "permissions": {
+                                    "viewer": "r",
+                                    "operator": "rw",
+                                    "engineer": "rw"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "arrays": [
+                    {
+                        "node_id": "PLC.Arrays.TemperatureHistory",
+                        "browse_name": "TemperatureHistory",
+                        "display_name": "HistoricoTemperatura",
+                        "datatype": "REAL",
+                        "length": 100,
+                        "initial_value": 0.0,
+                        "index": 50,
+                        "permissions": {
+                            "viewer": "r",
+                            "operator": "r",
+                            "engineer": "rw"
+                        }
+                    }
+                ]
+            }
         }
     }
 ]

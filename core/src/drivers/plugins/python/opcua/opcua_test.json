@@ -1,0 +1,107 @@
+[
+  {
+    "name": "opcua_server",
+    "protocol": "OPC-UA",
+    "config": {
+      "server": {
+        "name": "OpenPLC OPC UA Server",
+        "application_uri": "urn:openplc:runtime:opcua",
+        "product_uri": "urn:openplc:runtime:product",
+        "endpoint_url": "opc.tcp://0.0.0.0:4840/openplc/opcua",
+        "security_profiles": [
+          {
+            "name": "insecure",
+            "enabled": true,
+            "security_policy": "None",
+            "security_mode": "None",
+            "auth_methods": [
+              "Anonymous"
+            ]
+          },
+          {
+            "name": "signed",
+            "enabled": true,
+            "security_policy": "Basic256Sha256",
+            "security_mode": "Sign",
+            "auth_methods": [
+              "Username",
+              "Certificate"
+            ]
+          },
+          {
+            "name": "signed_encrypted",
+            "enabled": true,
+            "security_policy": "Basic256Sha256",
+            "security_mode": "SignAndEncrypt",
+            "auth_methods": [
+              "Username",
+              "Certificate"
+            ]
+          }
+        ]
+      },
+      "security": {
+        "server_certificate_strategy": "auto_self_signed",
+        "server_certificate_custom": null,
+        "server_private_key_custom": null,
+        "trusted_client_certificates": [
+          {
+            "id": "engineer_client",
+            "pem": "-----BEGIN CERTIFICATE-----\nMIIDoDCCAoigAwIBAgIUF+N0ueI9jbsaKYkp/QzkEnVDrZwwDQYJKoZIhvcNAQEL\nBQAwazELMAkGA1UEBhMCQlIxCzAJBgNVBAgMAlNQMRMwEQYDVQQHDApTw6NvIFBh\ndWxvMSAwHgYDVQQKDBdPcGVuUExDIEVuZ2luZWVyIENsaWVudDEYMBYGA1UEAwwP\nZW5naW5lZXItY2xpZW50MB4XDTI1MTIxMDA0MDEwM1oXDTI2MTIxMDA0MDEwM1ow\nazELMAkGA1UEBhMCQlIxCzAJBgNVBAgMAlNQMRMwEQYDVQQHDApTw6NvIFBhdWxv\nMSAwHgYDVQQKDBdPcGVuUExDIEVuZ2luZWVyIENsaWVudDEYMBYGA1UEAwwPZW5n\naW5lZXItY2xpZW50MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsjT2\npWyOfzKxCkfrOwpVVWE+/uv75SxcdJSs3qSxAlbrfYNQsc9wcP5jsAJ+RvJVvoeb\nBPatI9ygCpc6Njf+hyjMNHoWiOIM+o+cNH3nt1CFHfs1UjWgdzQAaLoi1+rAQacr\nIcvG4oMKglfdRA6AATTOiGEMF1T8TJL03bgTppT3d+x7O4I/0LTu8mLaxn6ECDQi\nE+N241i/oorBWx12OKVxUtEaejhbE6X0HTb08HRGqDa1Sj7GwD1t+w1KM+OemTCw\nUAvFP2YDAxbSBW7V+DO1G4ghJfjRwLXt3C+YQDDMcavBY3VYwAi77HG/L+APd9u4\nWIIKZnKAYPgrr5OVKwIDAQABozwwOjAaBgNVHREEEzARgglsb2NhbGhvc3SHBH8A\nAAEwDAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCBaAwDQYJKoZIhvcNAQELBQAD\nggEBADh3r0jOqAmqFE1jUX94ztRvMsLcP07I8GygCJDT15hNCCUkCDR0p9spQz7W\nwtt4eLWb6Rb48fha/C5ymbFBzpuMC/tV8PanOpcvK9F87t4BKxrs0q9qQp5V8Nh+\nqX/+5dS9sraWVOz7QY99jnzMzeX+UpSiElp8lElFYayJ5amOTFX9sboi0Xv3Ka8P\n6VcorqCi1Ca7rbNLG9ZMqKqnIBceEyJ4LlBFXxVmFf4alCBmQfArFLmwBJUNlrRv\nYGN9K9L+2D63IfNlf7lh2nahIMA17sjIeFJAc7zL42T9hJaEjGotPs9/JxZubHTR\nm85tVBjsbxGIBwiUcLynCfrr8iA=\n-----END CERTIFICATE-----\n"
+          },
+          {
+            "id": "scada_client",
+            "pem": "-----BEGIN CERTIFICATE-----\nMIIDlDCCAnygAwIBAgIULY9euMHsWJXgijbeaCYfgREj98owDQYJKoZIhvcNAQEL\nBQAwZTELMAkGA1UEBhMCQlIxCzAJBgNVBAgMAlNQMRMwEQYDVQQHDApTw6NvIFBh\ndWxvMR0wGwYDVQQKDBRPcGVuUExDIFNDQURBIENsaWVudDEVMBMGA1UEAwwMc2Nh\nZGEtY2xpZW50MB4XDTI1MTIxMDA0MDEwM1oXDTI2MTIxMDA0MDEwM1owZTELMAkG\nA1UEBhMCQlIxCzAJBgNVBAgMAlNQMRMwEQYDVQQHDApTw6NvIFBhdWxvMR0wGwYD\nVQQKDBRPcGVuUExDIFNDQURBIENsaWVudDEVMBMGA1UEAwwMc2NhZGEtY2xpZW50\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAycUvkUzEj2rHnn6uaV1w\nE8GlPR1IgfVyZFXCWdp0Btnr6B/rb5k9fas27A2PmcgAK7krcTMzq0M6GlksG52N\nVn7EohYXvViLHgV2PlvTC+eCiubQvZUlLrDCqclmHgKsUe4J8ayUC2QcXpBhn1wm\nWR5u13tp+CX+gpco6Te0JaC9NKILE7+8XCf9wzrNbsxQprJPNfy/Ec78dLWcelOK\nBrpSbFuhQqKjMEhDAMS9akhk3qR8seAluxbCKJZ5hIbY0yg8FlLawv4ONEIBjClv\nEoOYGMkPp334ZuszpHg1uUO/M/o1zEP9GPa53BXUhxi6kUzqD7auz1lfMqUgopaA\naQIDAQABozwwOjAaBgNVHREEEzARgglsb2NhbGhvc3SHBH8AAAEwDAYDVR0TAQH/\nBAIwADAOBgNVHQ8BAf8EBAMCBaAwDQYJKoZIhvcNAQELBQADggEBAHK9YfFg3Wef\nHTPKPUQW0tBJJYyIIKgQL5xbl3Gi6yf3uq5+CLF8uKCubY4nRdo4+JCyqX5WFD1j\nS4YMH5fI1LKFYK0IDpETbgw/7HVPb3O7cqGoeX6y8juHoIF877uvoAunOPF+xsjN\nRvUvOHqX3wk9ZdTKIjRkKXGjCCzjMPH3K1O0t0M6PvPwK3mE2v+b794nxNyRUjdn\n/iLO3E3KLgOzFD9X/WDzzNlH2h6G5wD0LG9x6CQcAwCEFlNO8utBSnl0F4a/yRnJ\n+LsI4s+r+mV7tMZjo1nSXzcGk/szQfJjKiS+2yxlmCSjoHHC3hYFts7bJFtUGxzQ\nXiVZmqoyMr0=\n-----END CERTIFICATE-----\n"
+          }
+        ]
+      },
+      "users": [
+        {
+          "type": "password",
+          "username": "viewer",
+          "password_hash": "$2b$12$aa...",
+          "role": "viewer"
+        },
+        {
+          "type": "password",
+          "username": "operator",
+          "password_hash": "$2b$12$bb...",
+          "role": "operator"
+        },
+        {
+          "type": "password",
+          "username": "engineer",
+          "password_hash": "$2b$12$cc...",
+          "role": "engineer"
+        },
+        {
+          "type": "certificate",
+          "certificate_id": "engineer_client",
+          "role": "engineer"
+        }
+      ],
+      "address_space": {
+        "namespace_uri": "urn:openplc:opcua:runtime",
+        "namespace_index": 2,
+        "variables": [
+          {
+            "node_id": "PLC.Outputs.Motor1",
+            "browse_name": "Motor1",
+            "display_name": "Motor 1",
+            "datatype": "BOOL",
+            "initial_value": false,
+            "description": "Comando de saída para motor 1",
+            "index": 21,
+            "permissions": {
+              "viewer": "r",
+              "operator": "rw",
+              "engineer": "rw"
+            }
+          }
+        ],
+        "structures": [],
+        "arrays": []
+      }
+    }
+  }
+]

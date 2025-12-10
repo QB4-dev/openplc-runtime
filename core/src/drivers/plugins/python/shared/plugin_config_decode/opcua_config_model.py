@@ -9,285 +9,347 @@ except ImportError:
     # For direct execution
     from plugin_config_contact import PluginConfigContract
 
+# Permission types for variables
+PermissionType = Literal["r", "w", "rw"]
+
 @dataclass
-class ClientAuthConfig:
-    """Configuration for client authentication and trust management."""
-    enabled: bool = False
-    trust_all_clients: bool = False
-    trusted_certificates_pem: List[str] = None
+class SecurityProfile:
+    """Configuration for a security profile/endpoint."""
+    name: str
+    enabled: bool
+    security_policy: str
+    security_mode: str
+    auth_methods: List[str]
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ClientAuthConfig':
-        """Creates a ClientAuthConfig instance from a dictionary."""
-        enabled = data.get("enabled", False)
-        trust_all_clients = data.get("trust_all_clients", False)
-        trusted_certificates_pem = data.get("trusted_certificates_pem", [])
+    def from_dict(cls, data: Dict[str, Any]) -> 'SecurityProfile':
+        """Creates a SecurityProfile instance from a dictionary."""
+        try:
+            name = data["name"]
+            enabled = data["enabled"]
+            security_policy = data["security_policy"]
+            security_mode = data["security_mode"]
+            auth_methods = data["auth_methods"]
+        except KeyError as e:
+            raise ValueError(f"Missing required field in security profile: {e}")
 
         return cls(
+            name=name,
             enabled=enabled,
-            trust_all_clients=trust_all_clients,
-            trusted_certificates_pem=trusted_certificates_pem
+            security_policy=security_policy,
+            security_mode=security_mode,
+            auth_methods=auth_methods
         )
 
-    def validate(self) -> None:
-        """Validate client authentication configuration."""
-        if self.enabled and not self.trust_all_clients and not self.trusted_certificates_pem:
-            raise ValueError("Client authentication enabled but no trusted certificates provided")
-
-        if self.trusted_certificates_pem:
-            for cert_pem in self.trusted_certificates_pem:
-                if not cert_pem.startswith("-----BEGIN CERTIFICATE-----"):
-                    raise ValueError("Invalid certificate format in trusted_certificates_pem")
-
-AccessMode = Literal["readwrite", "readonly"]
-VariableType = Literal["STRUCT", "ARRAY"]
-
 @dataclass
-class OpcuaVariableDefinition:
-    """Represents a variable definition that can be simple or complex (recursive)."""
+class ServerConfig:
+    """OPC-UA server basic configuration."""
     name: str
-    datatype: Optional[str] = None
-    index: Optional[int] = None
-    access: Optional[AccessMode] = None
-    type: Optional[VariableType] = None
-    members: Optional[List['OpcuaVariableDefinition']] = None
+    application_uri: str
+    product_uri: str
+    endpoint_url: str
+    security_profiles: List[SecurityProfile]
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'OpcuaVariableDefinition':
-        """Creates an OpcuaVariableDefinition instance from a dictionary (recursive)."""
-        # Check if it's a complex variable (STRUCT or ARRAY)
-        var_type = data.get("type")
-        if var_type in ["STRUCT", "ARRAY"]:
-            # Complex variable - requires name
-            try:
-                name = data["name"]
-            except KeyError as e:
-                raise ValueError(f"Missing required field 'name' in complex OPC-UA variable definition: {e}")
+    def from_dict(cls, data: Dict[str, Any]) -> 'ServerConfig':
+        """Creates a ServerConfig instance from a dictionary."""
+        try:
+            name = data["name"]
+            application_uri = data["application_uri"]
+            product_uri = data["product_uri"]
+            endpoint_url = data["endpoint_url"]
+            security_profiles_data = data["security_profiles"]
+        except KeyError as e:
+            raise ValueError(f"Missing required field in server config: {e}")
 
-            # Parse members recursively
-            members_data = data.get("members", [])
-            members = [cls.from_dict(member) for member in members_data]
-            return cls(
-                name=name,
-                type=var_type,
-                members=members
-            )
-        else:
-            # Simple variable - may not have name (for root level variables)
-            name = data.get("name", "")
+        security_profiles = [SecurityProfile.from_dict(sp) for sp in security_profiles_data]
 
-            try:
-                datatype = data["datatype"]
-                index = data["index"]
-                access = data["access"]
-            except KeyError as e:
-                raise ValueError(f"Missing required field in simple OPC-UA variable: {e}")
-
-            if access not in ["readwrite", "readonly"]:
-                raise ValueError(f"Invalid access mode: {access}. Must be 'readwrite' or 'readonly'")
-
-            return cls(
-                name=name,
-                datatype=datatype,
-                index=index,
-                access=access
-            )
-
-    def collect_leaf_variables(self) -> List['OpcuaVariableDefinition']:
-        """Recursively collect all leaf (simple) variables from this definition."""
-        leaves = []
-        if self.type in ["STRUCT", "ARRAY"] and self.members:
-            for member in self.members:
-                leaves.extend(member.collect_leaf_variables())
-        else:
-            leaves.append(self)
-        return leaves
-
-    def validate(self, path: str = "") -> None:
-        """Validate this variable definition recursively."""
-        current_path = f"{path}.{self.name}" if path else self.name
-
-        if self.type in ["STRUCT", "ARRAY"]:
-            if not self.members:
-                raise ValueError(f"Complex variable '{current_path}' has no members")
-            if self.datatype is not None or self.index is not None or self.access is not None:
-                raise ValueError(f"Complex variable '{current_path}' should not have datatype/index/access at root level")
-
-            # Validate members recursively
-            for member in self.members:
-                member.validate(current_path)
-        else:
-            # Simple variable validation
-            if self.datatype is None:
-                raise ValueError(f"Simple variable '{current_path}' missing datatype")
-            if self.index is None:
-                raise ValueError(f"Simple variable '{current_path}' missing index")
-            if self.access is None:
-                raise ValueError(f"Simple variable '{current_path}' missing access")
-            if self.members is not None:
-                raise ValueError(f"Simple variable '{current_path}' should not have members")
+        return cls(
+            name=name,
+            application_uri=application_uri,
+            product_uri=product_uri,
+            endpoint_url=endpoint_url,
+            security_profiles=security_profiles
+        )
 
 @dataclass
-class OpcuaVariableMember:
-    """Legacy class - represents a member of a STRUCT or ARRAY variable."""
+class SecurityConfig:
+    """Security configuration for certificates and trust."""
+    server_certificate_strategy: str
+    server_certificate_custom: Optional[str]
+    server_private_key_custom: Optional[str]
+    trusted_client_certificates: List[Dict[str, str]]
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SecurityConfig':
+        """Creates a SecurityConfig instance from a dictionary."""
+        server_certificate_strategy = data.get("server_certificate_strategy", "auto_self_signed")
+        server_certificate_custom = data.get("server_certificate_custom")
+        server_private_key_custom = data.get("server_private_key_custom")
+        trusted_client_certificates = data.get("trusted_client_certificates", [])
+
+        return cls(
+            server_certificate_strategy=server_certificate_strategy,
+            server_certificate_custom=server_certificate_custom,
+            server_private_key_custom=server_private_key_custom,
+            trusted_client_certificates=trusted_client_certificates
+        )
+
+@dataclass
+class User:
+    """User configuration for authentication."""
+    type: str
+    username: Optional[str]
+    password_hash: Optional[str]
+    certificate_id: Optional[str]
+    role: str
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'User':
+        """Creates a User instance from a dictionary."""
+        try:
+            user_type = data["type"]
+            role = data["role"]
+        except KeyError as e:
+            raise ValueError(f"Missing required field in user config: {e}")
+
+        username = data.get("username")
+        password_hash = data.get("password_hash")
+        certificate_id = data.get("certificate_id")
+
+        return cls(
+            type=user_type,
+            username=username,
+            password_hash=password_hash,
+            certificate_id=certificate_id,
+            role=role
+        )
+
+@dataclass
+class VariablePermissions:
+    """Permissions for a variable per role."""
+    viewer: PermissionType
+    operator: PermissionType
+    engineer: PermissionType
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'VariablePermissions':
+        """Creates a VariablePermissions instance from a dictionary."""
+        viewer = data.get("viewer", "r")
+        operator = data.get("operator", "r")
+        engineer = data.get("engineer", "rw")
+
+        return cls(
+            viewer=viewer,
+            operator=operator,
+            engineer=engineer
+        )
+
+@dataclass
+class VariableField:
+    """Field within a struct variable."""
     name: str
     datatype: str
+    initial_value: Any
     index: int
-    access: AccessMode
+    permissions: VariablePermissions
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'OpcuaVariableMember':
-        """Creates an OpcuaVariableMember instance from a dictionary."""
+    def from_dict(cls, data: Dict[str, Any]) -> 'VariableField':
+        """Creates a VariableField instance from a dictionary."""
         try:
             name = data["name"]
             datatype = data["datatype"]
+            initial_value = data["initial_value"]
             index = data["index"]
-            access = data["access"]
+            permissions_data = data["permissions"]
         except KeyError as e:
-            raise ValueError(f"Missing required field in OPC-UA variable member: {e}")
+            raise ValueError(f"Missing required field in variable field: {e}")
 
-        if access not in ["readwrite", "readonly"]:
-            raise ValueError(f"Invalid access mode: {access}. Must be 'readwrite' or 'readonly'")
-
-        return cls(name=name, datatype=datatype, index=index, access=access)
-
-@dataclass
-class OpcuaVariable:
-    """Represents an OPC-UA variable with recursive structure support."""
-    node_name: str
-    definition: OpcuaVariableDefinition
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'OpcuaVariable':
-        """Creates an OpcuaVariable instance from a dictionary."""
-        try:
-            node_name = data["node_name"]
-        except KeyError as e:
-            raise ValueError(f"Missing required field 'node_name' in OPC-UA variable: {e}")
-
-        # Create the variable definition (handles both simple and complex cases recursively)
-        # Copy data and ensure 'name' field exists for complex variables
-        definition_data = data.copy()
-        definition_data.pop("node_name", None)
-
-        # For complex variables, we need a 'name' field - use an empty string since root level doesn't need names
-        # The actual node name is stored separately in OpcuaVariable.node_name
-        if "type" in definition_data and definition_data["type"] in ["STRUCT", "ARRAY"]:
-            # For complex root variables, add a dummy name (not used in node creation)
-            definition_data["name"] = ""
-
-        definition = OpcuaVariableDefinition.from_dict(definition_data)
+        permissions = VariablePermissions.from_dict(permissions_data)
 
         return cls(
-            node_name=node_name,
-            definition=definition
+            name=name,
+            datatype=datatype,
+            initial_value=initial_value,
+            index=index,
+            permissions=permissions
         )
 
-    def collect_leaf_variables(self) -> List[OpcuaVariableDefinition]:
-        """Collect all leaf (simple) variables recursively."""
-        return self.definition.collect_leaf_variables()
+@dataclass
+class StructVariable:
+    """Struct variable configuration."""
+    node_id: str
+    browse_name: str
+    display_name: str
+    description: str
+    fields: List[VariableField]
 
-    def validate(self) -> None:
-        """Validate the variable definition."""
-        self.definition.validate(self.node_name)
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'StructVariable':
+        """Creates a StructVariable instance from a dictionary."""
+        try:
+            node_id = data["node_id"]
+            browse_name = data["browse_name"]
+            display_name = data["display_name"]
+            description = data["description"]
+            fields_data = data["fields"]
+        except KeyError as e:
+            raise ValueError(f"Missing required field in struct variable: {e}")
+
+        fields = [VariableField.from_dict(field) for field in fields_data]
+
+        return cls(
+            node_id=node_id,
+            browse_name=browse_name,
+            display_name=display_name,
+            description=description,
+            fields=fields
+        )
+
+@dataclass
+class ArrayVariable:
+    """Array variable configuration."""
+    node_id: str
+    browse_name: str
+    display_name: str
+    datatype: str
+    length: int
+    initial_value: Any
+    index: int
+    permissions: VariablePermissions
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ArrayVariable':
+        """Creates an ArrayVariable instance from a dictionary."""
+        try:
+            node_id = data["node_id"]
+            browse_name = data["browse_name"]
+            display_name = data["display_name"]
+            datatype = data["datatype"]
+            length = data["length"]
+            initial_value = data["initial_value"]
+            index = data["index"]
+            permissions_data = data["permissions"]
+        except KeyError as e:
+            raise ValueError(f"Missing required field in array variable: {e}")
+
+        permissions = VariablePermissions.from_dict(permissions_data)
+
+        return cls(
+            node_id=node_id,
+            browse_name=browse_name,
+            display_name=display_name,
+            datatype=datatype,
+            length=length,
+            initial_value=initial_value,
+            index=index,
+            permissions=permissions
+        )
+
+@dataclass
+class SimpleVariable:
+    """Simple variable configuration."""
+    node_id: str
+    browse_name: str
+    display_name: str
+    datatype: str
+    initial_value: Any
+    description: str
+    index: int
+    permissions: VariablePermissions
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SimpleVariable':
+        """Creates a SimpleVariable instance from a dictionary."""
+        try:
+            node_id = data["node_id"]
+            browse_name = data["browse_name"]
+            display_name = data["display_name"]
+            datatype = data["datatype"]
+            initial_value = data["initial_value"]
+            description = data["description"]
+            index = data["index"]
+            permissions_data = data["permissions"]
+        except KeyError as e:
+            raise ValueError(f"Missing required field in simple variable: {e}")
+
+        permissions = VariablePermissions.from_dict(permissions_data)
+
+        return cls(
+            node_id=node_id,
+            browse_name=browse_name,
+            display_name=display_name,
+            datatype=datatype,
+            initial_value=initial_value,
+            description=description,
+            index=index,
+            permissions=permissions
+        )
+
+@dataclass
+class AddressSpace:
+    """Address space configuration."""
+    namespace_uri: str
+    namespace_index: int
+    variables: List[SimpleVariable]
+    structures: List[StructVariable]
+    arrays: List[ArrayVariable]
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'AddressSpace':
+        """Creates an AddressSpace instance from a dictionary."""
+        try:
+            namespace_uri = data["namespace_uri"]
+            namespace_index = data["namespace_index"]
+            variables_data = data.get("variables", [])
+            structures_data = data.get("structures", [])
+            arrays_data = data.get("arrays", [])
+        except KeyError as e:
+            raise ValueError(f"Missing required field in address space: {e}")
+
+        variables = [SimpleVariable.from_dict(var) for var in variables_data]
+        structures = [StructVariable.from_dict(struct) for struct in structures_data]
+        arrays = [ArrayVariable.from_dict(arr) for arr in arrays_data]
+
+        return cls(
+            namespace_uri=namespace_uri,
+            namespace_index=namespace_index,
+            variables=variables,
+            structures=structures,
+            arrays=arrays
+        )
 
 @dataclass
 class OpcuaConfig:
-    """Represents the OPC-UA server configuration."""
-    endpoint: str
-    server_name: str
-    security_policy: str
-    security_mode: str
-    client_auth: ClientAuthConfig
-    cycle_time_ms: int
-    namespace: str
-    variables: List[OpcuaVariable]
-
-    # Valid security policies and modes
-    VALID_SECURITY_POLICIES = [
-        "None",
-        "Basic256Sha256",
-        "Aes128_Sha256_RsaOaep",
-        "Aes256_Sha256_RsaPss"
-    ]
-
-    VALID_SECURITY_MODES = [
-        "None",
-        "Sign",
-        "SignAndEncrypt"
-    ]
+    """Complete OPC-UA configuration."""
+    server: ServerConfig
+    security: SecurityConfig
+    users: List[User]
+    address_space: AddressSpace
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'OpcuaConfig':
         """Creates an OpcuaConfig instance from a dictionary."""
         try:
-            endpoint = data["endpoint"]
-            server_name = data["server_name"]
-            security_policy = data["security_policy"]
-            security_mode = data["security_mode"]
-            cycle_time_ms = data["cycle_time_ms"]
-            namespace = data["namespace"]
-            variables_data = data["variables"]
+            server_data = data["server"]
+            security_data = data["security"]
+            users_data = data["users"]
+            address_space_data = data["address_space"]
         except KeyError as e:
-            raise ValueError(f"Missing required field in OPC-UA config: {e}")
+            raise ValueError(f"Missing required section in OPC-UA config: {e}")
 
-        # Parse client authentication config
-        client_auth_data = data.get("client_auth", {})
-        client_auth = ClientAuthConfig.from_dict(client_auth_data)
+        server = ServerConfig.from_dict(server_data)
+        security = SecurityConfig.from_dict(security_data)
+        users = [User.from_dict(user) for user in users_data]
+        address_space = AddressSpace.from_dict(address_space_data)
 
-        variables = [OpcuaVariable.from_dict(var) for var in variables_data]
-
-        config = cls(
-            endpoint=endpoint,
-            server_name=server_name,
-            security_policy=security_policy,
-            security_mode=security_mode,
-            client_auth=client_auth,
-            cycle_time_ms=cycle_time_ms,
-            namespace=namespace,
-            variables=variables
+        return cls(
+            server=server,
+            security=security,
+            users=users,
+            address_space=address_space
         )
-
-        # Validate security configuration
-        config.validate_security_config()
-
-        return config
-
-    def validate_security_config(self) -> None:
-        """Validate security-related configuration."""
-        # Validate security policy
-        if self.security_policy not in self.VALID_SECURITY_POLICIES:
-            raise ValueError(
-                f"Invalid security_policy: '{self.security_policy}'. "
-                f"Valid options: {', '.join(self.VALID_SECURITY_POLICIES)}"
-            )
-
-        # Validate security mode
-        if self.security_mode not in self.VALID_SECURITY_MODES:
-            raise ValueError(
-                f"Invalid security_mode: '{self.security_mode}'. "
-                f"Valid options: {', '.join(self.VALID_SECURITY_MODES)}"
-            )
-
-        # Validate client authentication config
-        self.client_auth.validate()
-
-        # Validate consistency between policy and mode
-        if self.security_policy == "None" and self.security_mode != "None":
-            raise ValueError(
-                "Cannot use security_mode other than 'None' with security_policy='None'"
-            )
-
-        if self.security_mode == "None" and self.security_policy != "None":
-            raise ValueError(
-                "Cannot use security_policy other than 'None' with security_mode='None'"
-            )
-
-        # Validate that client auth is only enabled when security is enabled
-        if self.client_auth.enabled and self.security_policy == "None":
-            raise ValueError(
-                "Client authentication cannot be enabled when security_policy is 'None'"
-            )
 
 @dataclass
 class OpcuaPluginConfig:
@@ -347,24 +409,24 @@ class OpcuaMasterConfig(PluginConfigContract):
             if not plugin.name:
                 raise ValueError(f"Plugin #{i+1} has empty name")
 
-            # Validate config
-            config = plugin.config
-            if config.cycle_time_ms <= 0:
-                raise ValueError(f"Invalid cycle_time_ms for plugin '{plugin.name}': {config.cycle_time_ms}. Must be positive")
+            # Validate address space
+            address_space = plugin.config.address_space
 
-            if not config.variables:
-                raise ValueError(f"No variables defined for plugin '{plugin.name}'")
+            # Check for duplicate node_ids
+            all_node_ids = []
+            all_node_ids.extend([var.node_id for var in address_space.variables])
+            all_node_ids.extend([struct.node_id for struct in address_space.structures])
+            all_node_ids.extend([arr.node_id for arr in address_space.arrays])
 
-            # Check for duplicate variable names within a plugin
-            var_names = [var.node_name for var in config.variables]
-            if len(var_names) != len(set(var_names)):
-                raise ValueError(f"Duplicate variable names found in plugin '{plugin.name}'")
+            if len(all_node_ids) != len(set(all_node_ids)):
+                raise ValueError(f"Duplicate node_ids found in plugin '{plugin.name}'")
 
-            # Check for duplicate indices within a plugin (collect from all leaf variables)
+            # Check for duplicate indices
             all_indices = []
-            for var in config.variables:
-                leaf_vars = var.collect_leaf_variables()
-                all_indices.extend([leaf.index for leaf in leaf_vars if leaf.index is not None])
+            all_indices.extend([var.index for var in address_space.variables])
+            for struct in address_space.structures:
+                all_indices.extend([field.index for field in struct.fields])
+            all_indices.extend([arr.index for arr in address_space.arrays])
 
             if len(all_indices) != len(set(all_indices)):
                 raise ValueError(f"Duplicate indices found in plugin '{plugin.name}'")
