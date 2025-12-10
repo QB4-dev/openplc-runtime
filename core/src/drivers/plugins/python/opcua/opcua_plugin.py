@@ -48,6 +48,7 @@ try:
         infer_var_type,
     )
     from .opcua_memory import read_memory_direct, initialize_variable_cache
+    from .opcua_security import OpcuaSecurityManager
 except ImportError:
     # Fallback to absolute imports (when run standalone)
     from opcua_types import VariableNode, VariableMetadata
@@ -58,6 +59,7 @@ except ImportError:
         infer_var_type,
     )
     from opcua_memory import read_memory_direct, initialize_variable_cache
+    from opcua_security import OpcuaSecurityManager
 
 # Global variables for plugin lifecycle and configuration
 runtime_args = None
@@ -217,6 +219,7 @@ class OpcuaServer:
         self.cert_validator = None
         self.temp_cert_files = []  # Track temporary certificate files for cleanup
         self.node_permissions: Dict[str, VariablePermissions] = {}  # Maps node_id -> permissions
+        self.security_manager = OpcuaSecurityManager(config, os.path.dirname(__file__))
 
     async def setup_server(self) -> bool:
         """Initialize and configure the OPC-UA server using native asyncua APIs."""
@@ -254,14 +257,14 @@ class OpcuaServer:
                 build_date=datetime.now()
             )
 
-            # Configure security policies and endpoints
-            await self._setup_security_policies()
-
-            # Setup certificate validation
-            await self._setup_certificate_validation()
-
-            # Load server certificates
-            await self._setup_server_certificates()
+            # Configure security using SecurityManager
+            await self.security_manager.setup_server_security(self.server, self.config.server.security_profiles)
+            
+            # Setup certificate validation using SecurityManager
+            await self.security_manager.setup_certificate_validation(
+                self.server, 
+                self.config.security.trusted_client_certificates
+            )
 
             # Register namespace
             self.namespace_idx = await self.server.register_namespace(self.config.address_space.namespace_uri)
@@ -277,194 +280,11 @@ class OpcuaServer:
             traceback.print_exc()
             return False
 
-    async def _setup_security_policies(self) -> None:
-        """Setup security policies for enabled profiles."""
-        security_policies = []
 
-        for profile in self.config.server.security_profiles:
-            if not profile.enabled:
-                continue
 
-            # Map security policy + mode combinations to asyncua enums
-            # The SecurityPolicyType enum already includes the mode in its name
-            policy_mode_map = {
-                ("None", "None"): ua.SecurityPolicyType.NoSecurity,
-                ("Basic256Sha256", "Sign"): ua.SecurityPolicyType.Basic256Sha256_Sign,
-                ("Basic256Sha256", "SignAndEncrypt"): ua.SecurityPolicyType.Basic256Sha256_SignAndEncrypt,
-                ("Basic256", "Sign"): ua.SecurityPolicyType.Basic256_Sign,
-                ("Basic256", "SignAndEncrypt"): ua.SecurityPolicyType.Basic256_SignAndEncrypt,
-                ("Basic128Rsa15", "Sign"): ua.SecurityPolicyType.Basic128Rsa15_Sign,
-                ("Basic128Rsa15", "SignAndEncrypt"): ua.SecurityPolicyType.Basic128Rsa15_SignAndEncrypt,
-                ("Aes128_Sha256_RsaOaep", "Sign"): ua.SecurityPolicyType.Aes128Sha256RsaOaep_Sign,
-                ("Aes128_Sha256_RsaOaep", "SignAndEncrypt"): ua.SecurityPolicyType.Aes128Sha256RsaOaep_SignAndEncrypt,
-                ("Aes256_Sha256_RsaPss", "Sign"): ua.SecurityPolicyType.Aes256Sha256RsaPss_Sign,
-                ("Aes256_Sha256_RsaPss", "SignAndEncrypt"): ua.SecurityPolicyType.Aes256Sha256RsaPss_SignAndEncrypt,
-            }
 
-            policy_key = (profile.security_policy, profile.security_mode)
-            policy_type = policy_mode_map.get(policy_key)
 
-            if policy_type is not None:
-                security_policies.append(policy_type)
-                print(f"(INFO) Added security profile '{profile.name}': {profile.security_policy}/{profile.security_mode} -> {policy_type}")
-            else:
-                print(f"(WARN) Unsupported security policy/mode combination '{profile.security_policy}/{profile.security_mode}' for profile '{profile.name}', skipping")
 
-        if security_policies:
-            self.server.set_security_policy(security_policies)
-        else:
-            # Default to no security if no profiles enabled
-            self.server.set_security_policy([ua.SecurityPolicyType.NoSecurity])
-
-    async def _setup_certificate_validation(self) -> None:
-        """Setup certificate validation using TrustStore and CertificateValidator."""
-        if not self.config.security.trusted_client_certificates:
-            return
-
-        try:
-            # NEW APPROACH: Use cryptography library to handle PEM certificates properly
-            # This fixes the ASN.1 parsing error when loading PEM certificate strings
-            USE_CRYPTOGRAPHY_APPROACH = True  # Set to False to revert to old asyncua-only approach
-
-            if USE_CRYPTOGRAPHY_APPROACH:
-                # Import cryptography for certificate handling
-                from cryptography import x509
-                from cryptography.hazmat.backends import default_backend
-                from cryptography.hazmat.primitives import serialization
-                import tempfile
-                import os
-                from pathlib import Path
-
-                cert_file_paths = []
-                for cert_info in self.config.security.trusted_client_certificates:
-                    try:
-                        cert_pem = cert_info["pem"]
-
-                        # Load certificate using cryptography (handles PEM format correctly)
-                        cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
-
-                        # Convert to DER format for asyncua TrustStore
-                        cert_der = cert.public_bytes(encoding=serialization.Encoding.DER)
-
-                        # Create temporary file for the certificate
-                        cert_fd, cert_path = tempfile.mkstemp(suffix='.der', prefix='trusted_cert_')
-                        try:
-                            with os.fdopen(cert_fd, 'wb') as f:
-                                f.write(cert_der)
-                            cert_file_paths.append(Path(cert_path))
-                            self.temp_cert_files.append(cert_path)  # Track for cleanup
-                            print(f"(INFO) Loaded trusted certificate: {cert_info['id']} -> {cert_path}")
-                        except Exception as e:
-                            os.close(cert_fd)  # Close if writing failed
-                            raise e
-
-                    except Exception as e:
-                        print(f"(WARN) Failed to load certificate {cert_info['id']}: {e}")
-
-            else:
-                # OLD APPROACH: Direct asyncua certificate loading (kept for easy reversion)
-                # This approach fails with PEM strings because load_certificate expects DER or file paths
-                from asyncua.crypto.cert_gen import load_certificate
-                from cryptography import x509
-                import tempfile
-                import os
-                from pathlib import Path
-
-                cert_file_paths = []
-                for cert_info in self.config.security.trusted_client_certificates:
-                    try:
-                        cert_pem = cert_info["pem"]
-                        # Load certificate using asyncua's function
-                        cert = await load_certificate(cert_pem.encode())
-                        
-                        # For OLD approach, we also need to create temp files as TrustStore expects paths
-                        # Convert cert to DER and save to temp file
-                        cert_der = cert.public_bytes(encoding=x509.Encoding.DER)
-                        cert_fd, cert_path = tempfile.mkstemp(suffix='.der', prefix='trusted_cert_')
-                        try:
-                            with os.fdopen(cert_fd, 'wb') as f:
-                                f.write(cert_der)
-                            cert_file_paths.append(Path(cert_path))
-                            self.temp_cert_files.append(cert_path)  # Track for cleanup
-                            print(f"(INFO) Loaded trusted certificate: {cert_info['id']} -> {cert_path}")
-                        except Exception as e:
-                            os.close(cert_fd)  # Close if writing failed
-                            raise e
-                            
-                    except Exception as e:
-                        print(f"(WARN) Failed to load certificate {cert_info['id']}: {e}")
-
-            # Create trust store with certificate file paths
-            self.trust_store = TrustStore(cert_file_paths, [])
-            # Load the trust store (always async)
-            await self.trust_store.load()
-
-            # Create certificate validator
-            self.cert_validator = CertificateValidator(trust_store=self.trust_store)
-
-            # Set validator on server
-            self.server.set_certificate_validator(self.cert_validator)
-            print("(PASS) Certificate validation configured")
-
-        except Exception as e:
-            print(f"(FAIL) Failed to setup certificate validation: {e}")
-
-    async def _setup_server_certificates(self) -> None:
-        """Setup server certificates."""
-        if self.config.security.server_certificate_strategy == "auto_self_signed":
-            # Generate self-signed certificate
-            from asyncua.crypto.cert_gen import setup_self_signed_certificate
-            from pathlib import Path
-            import socket
-            import tempfile
-            import os
-
-            # Get hostname for certificate - use multiple names for better connectivity
-            hostname = socket.gethostname()
-            hostnames = [hostname, "localhost", "127.0.0.1"]
-            
-            # Extract hostname from endpoint URL if different
-            endpoint_hostname = self.config.server.endpoint_url.split("://")[1].split(":")[0]
-            if endpoint_hostname not in hostnames:
-                hostnames.append(endpoint_hostname)
-
-            # Create temporary files for certificate generation
-            with tempfile.TemporaryDirectory() as temp_dir:
-                key_file = Path(temp_dir) / "server_key.pem"
-                cert_file = Path(temp_dir) / "server_cert.pem"
-
-                # Generate certificate (function returns None, files are created)
-                await setup_self_signed_certificate(
-                    key_file=key_file,
-                    cert_file=cert_file,
-                    app_uri=self.config.server.application_uri,
-                    host_name=hostnames[0],  # Primary hostname
-                    cert_use=[],  # Default certificate uses
-                    subject_attrs={}  # Default subject attributes
-                )
-
-                # Load certificate data from files
-                with open(cert_file, 'rb') as f:
-                    cert_pem = f.read()
-                with open(key_file, 'rb') as f:
-                    key_pem = f.read()
-
-            await self.server.load_certificate(cert_pem, key_pem)
-            print("(PASS) Self-signed server certificate generated and loaded")
-
-        elif self.config.security.server_certificate_custom:
-            # Load custom certificate
-            try:
-                cert_path = self.config.security.server_certificate_custom
-                key_path = self.config.security.server_private_key_custom
-
-                if cert_path and key_path:
-                    await self.server.load_certificate(cert_path, key_path)
-                    print("(PASS) Custom server certificate loaded")
-                else:
-                    print("(WARN) Custom certificate paths not fully specified")
-            except Exception as e:
-                print(f"(FAIL) Failed to load custom certificate: {e}")
 
     async def _setup_callbacks(self) -> None:
         """Setup callbacks for auditing and access control."""

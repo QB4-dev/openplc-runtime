@@ -13,13 +13,19 @@ import ssl
 import socket
 import hashlib
 import asyncio
+import tempfile
 from pathlib import Path
 from typing import Optional, Tuple, List
 from urllib.parse import urlparse
 from asyncua.crypto import uacrypto
 from asyncua.crypto.cert_gen import setup_self_signed_certificate
 from asyncua.crypto.security_policies import SecurityPolicyBasic256Sha256, SecurityPolicyAes128Sha256RsaOaep, SecurityPolicyAes256Sha256RsaPss
+from asyncua.crypto.truststore import TrustStore
+from asyncua.crypto.validator import CertificateValidator
+from asyncua import ua
 from cryptography.x509.oid import ExtensionOID, ExtendedKeyUsageOID
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
 
 
 class OpcuaSecurityManager:
@@ -38,6 +44,21 @@ class OpcuaSecurityManager:
         "None": 1,  # MessageSecurityMode.None
         "Sign": 2,  # MessageSecurityMode.Sign
         "SignAndEncrypt": 3  # MessageSecurityMode.SignAndEncrypt
+    }
+
+    # Mapping from (policy, mode) to SecurityPolicyType for asyncua Server
+    POLICY_TYPE_MAPPING = {
+        ("None", "None"): ua.SecurityPolicyType.NoSecurity,
+        ("Basic256Sha256", "Sign"): ua.SecurityPolicyType.Basic256Sha256_Sign,
+        ("Basic256Sha256", "SignAndEncrypt"): ua.SecurityPolicyType.Basic256Sha256_SignAndEncrypt,
+        ("Basic256", "Sign"): ua.SecurityPolicyType.Basic256_Sign,
+        ("Basic256", "SignAndEncrypt"): ua.SecurityPolicyType.Basic256_SignAndEncrypt,
+        ("Basic128Rsa15", "Sign"): ua.SecurityPolicyType.Basic128Rsa15_Sign,
+        ("Basic128Rsa15", "SignAndEncrypt"): ua.SecurityPolicyType.Basic128Rsa15_SignAndEncrypt,
+        ("Aes128_Sha256_RsaOaep", "Sign"): ua.SecurityPolicyType.Aes128Sha256RsaOaep_Sign,
+        ("Aes128_Sha256_RsaOaep", "SignAndEncrypt"): ua.SecurityPolicyType.Aes128Sha256RsaOaep_SignAndEncrypt,
+        ("Aes256_Sha256_RsaPss", "Sign"): ua.SecurityPolicyType.Aes256Sha256RsaPss_Sign,
+        ("Aes256_Sha256_RsaPss", "SignAndEncrypt"): ua.SecurityPolicyType.Aes256Sha256RsaPss_SignAndEncrypt,
     }
 
     CERTS_DIR = "certs"
@@ -417,3 +438,170 @@ class OpcuaSecurityManager:
         except Exception as e:
             print(f"(FAIL) Failed to generate server certificate: {e}")
             return False
+
+    async def setup_server_security(self, server, security_profiles) -> None:
+        """Setup security policies and certificates for asyncua Server.
+        
+        Args:
+            server: asyncua Server instance
+            security_profiles: List of security profiles from config
+        """
+        # Setup security policies
+        security_policies = []
+        
+        for profile in security_profiles:
+            if not profile.enabled:
+                continue
+                
+            policy_key = (profile.security_policy, profile.security_mode)
+            policy_type = self.POLICY_TYPE_MAPPING.get(policy_key)
+            
+            if policy_type is not None:
+                security_policies.append(policy_type)
+                print(f"(INFO) Added security profile '{profile.name}': {profile.security_policy}/{profile.security_mode} -> {policy_type}")
+            else:
+                print(f"(WARN) Unsupported security policy/mode combination '{profile.security_policy}/{profile.security_mode}' for profile '{profile.name}', skipping")
+        
+        if security_policies:
+            server.set_security_policy(security_policies)
+        else:
+            # Default to no security if no profiles enabled
+            server.set_security_policy([ua.SecurityPolicyType.NoSecurity])
+        
+        # Setup server certificates if needed
+        await self._setup_server_certificates_for_asyncua(server)
+    
+    async def _setup_server_certificates_for_asyncua(self, server) -> None:
+        """Setup server certificates for asyncua Server."""
+        if hasattr(self.config, 'security') and self.config.security.server_certificate_strategy == "auto_self_signed":
+            # Generate self-signed certificate in temp directory and load into server
+            with tempfile.TemporaryDirectory() as temp_dir:
+                key_file = Path(temp_dir) / "server_key.pem"
+                cert_file = Path(temp_dir) / "server_cert.pem"
+                
+                # Get hostname for certificate
+                hostname = socket.gethostname()
+                app_uri = getattr(self.config.server, 'application_uri', 'urn:autonomy-logic:openplc:opcua:server')
+                
+                # Generate certificate
+                await setup_self_signed_certificate(
+                    key_file=key_file,
+                    cert_file=cert_file,
+                    app_uri=app_uri,
+                    host_name=hostname,
+                    cert_use=[],
+                    subject_attrs={}
+                )
+                
+                # Load certificate data from files
+                with open(cert_file, 'rb') as f:
+                    cert_pem = f.read()
+                with open(key_file, 'rb') as f:
+                    key_pem = f.read()
+                
+                await server.load_certificate(cert_pem, key_pem)
+                print("(PASS) Self-signed server certificate generated and loaded")
+        
+        elif hasattr(self.config, 'security') and self.config.security.server_certificate_custom:
+            # Load custom certificate
+            try:
+                cert_path = self.config.security.server_certificate_custom
+                key_path = self.config.security.server_private_key_custom
+                
+                if cert_path and key_path:
+                    await server.load_certificate(cert_path, key_path)
+                    print("(PASS) Custom server certificate loaded")
+                else:
+                    print("(WARN) Custom certificate paths not fully specified")
+            except Exception as e:
+                print(f"(FAIL) Failed to load custom certificate: {e}")
+        
+        elif self.certificate_data and self.private_key_data:
+            # Use certificates loaded by SecurityManager
+            await server.load_certificate(self.certificate_data, self.private_key_data)
+            print("(PASS) SecurityManager certificates loaded into server")
+    
+    async def create_trust_store(self, trusted_certificates: List[str]) -> Optional[TrustStore]:
+        """Create and configure TrustStore with trusted client certificates.
+        
+        Args:
+            trusted_certificates: List of PEM certificate strings
+            
+        Returns:
+            TrustStore instance or None if failed
+        """
+        if not trusted_certificates:
+            return None
+            
+        try:
+            # Create temporary directory for certificate files
+            temp_dir = tempfile.mkdtemp(prefix="opcua_trust_")
+            cert_files = []
+            
+            for i, cert_pem in enumerate(trusted_certificates):
+                try:
+                    # Load and validate certificate using cryptography
+                    cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
+                    
+                    # Convert to DER format and save to temporary file
+                    cert_der = cert.public_bytes(encoding=x509.Encoding.DER)
+                    
+                    cert_file = os.path.join(temp_dir, f"trusted_cert_{i}.der")
+                    with open(cert_file, 'wb') as f:
+                        f.write(cert_der)
+                    
+                    cert_files.append(cert_file)
+                    print(f"(INFO) Added trusted certificate {i+1} to trust store")
+                    
+                except Exception as e:
+                    print(f"(WARN) Failed to process trusted certificate {i+1}: {e}")
+            
+            if cert_files:
+                # Create TrustStore with certificate files
+                trust_store = TrustStore(cert_files, [])
+                await trust_store.load()
+                print(f"(PASS) TrustStore created with {len(cert_files)} certificates")
+                return trust_store
+            else:
+                print("(WARN) No valid trusted certificates processed")
+                return None
+                
+        except Exception as e:
+            print(f"(FAIL) Failed to create TrustStore: {e}")
+            return None
+    
+    async def setup_certificate_validation(self, server, trusted_certificates) -> None:
+        """Setup certificate validation for asyncua Server.
+        
+        Args:
+            server: asyncua Server instance
+            trusted_certificates: List of certificate dictionaries with 'id' and 'pem' keys
+        """
+        if not trusted_certificates:
+            return
+            
+        try:
+            # Handle both List[str] and List[Dict[str, str]] formats
+            cert_pems = []
+            if trusted_certificates and isinstance(trusted_certificates[0], dict):
+                # Extract PEM strings from certificate dictionaries
+                cert_pems = [cert_info["pem"] for cert_info in trusted_certificates]
+            else:
+                # Already a list of PEM strings
+                cert_pems = trusted_certificates
+            
+            # Create trust store
+            trust_store = await self.create_trust_store(cert_pems)
+            if not trust_store:
+                print("(FAIL) Could not create trust store")
+                return
+            
+            # Create certificate validator
+            cert_validator = CertificateValidator(trust_store=trust_store)
+            
+            # Set validator on server
+            server.set_certificate_validator(cert_validator)
+            print("(PASS) Certificate validation configured")
+            
+        except Exception as e:
+            print(f"(FAIL) Failed to setup certificate validation: {e}")
