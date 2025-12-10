@@ -216,6 +216,7 @@ class OpcuaServer:
         self.trust_store = None
         self.cert_validator = None
         self.temp_cert_files = []  # Track temporary certificate files for cleanup
+        self.node_permissions: Dict[str, VariablePermissions] = {}  # Maps node_id -> permissions
 
     async def setup_server(self) -> bool:
         """Initialize and configure the OPC-UA server using native asyncua APIs."""
@@ -486,33 +487,93 @@ class OpcuaServer:
             if arr.permissions.engineer == "rw" or arr.permissions.operator == "rw":
                 nodes_requiring_callbacks.append(arr.node_id)
 
-        # Note: Callbacks are disabled for now due to NodeId parsing issues
-        # TODO: Implement proper NodeId resolution for callbacks
+        # Register callbacks for all nodes that have any write permissions
         if nodes_requiring_callbacks:
-            print(f"(INFO) Skipping callback registration for {len(nodes_requiring_callbacks)} nodes (NodeId parsing issue)")
+            print(f"(INFO) Registering callbacks for {len(nodes_requiring_callbacks)} nodes")
+            try:
+                # Register pre-read and pre-write callbacks with the server
+                from asyncua.common.callback import CallbackType
+                await self.server.iserver.subscribe_server_callback(CallbackType.PreRead, self._on_pre_read)
+                await self.server.iserver.subscribe_server_callback(CallbackType.PreWrite, self._on_pre_write)
+                print(f"(PASS) Successfully registered permission callbacks")
+            except Exception as e:
+                print(f"(WARN) Failed to register callbacks: {e}")
 
     async def _on_pre_read(self, node, context):
-        """Callback for pre-read operations."""
-        user = context.user
-        if user:
-            log_info(f"User {user.username} ({user.role}) reading node {node}")
+        """Callback for pre-read operations with permission enforcement."""
+        user = getattr(context, 'user', None)
+        node_id = str(node.nodeid)
+        
+        # Extract actual node_id from the full node string if needed
+        if node_id.startswith("ns=") and ";" in node_id:
+            # Extract the part after the last semicolon for comparison
+            node_parts = node_id.split(";")[-1]
+            if "=" in node_parts:
+                simple_node_id = node_parts.split("=", 1)[-1]
+            else:
+                simple_node_id = node_parts
         else:
-            log_info(f"Anonymous read on node {node}")
+            simple_node_id = node_id
+        
+        # Check if we have permissions configured for this node
+        permissions = None
+        for stored_node_id, perms in self.node_permissions.items():
+            if stored_node_id == simple_node_id or stored_node_id.endswith(simple_node_id):
+                permissions = perms
+                break
+        
+        if permissions and user and hasattr(user, 'role'):
+            user_role = user.role
+            role_permission = getattr(permissions, user_role, "")
+            
+            if "r" not in role_permission:
+                log_warn(f"DENY read for user {getattr(user, 'name', 'unknown')} (role: {user_role}) on node {simple_node_id}")
+                raise ua.UaError(f"Access denied: insufficient read permissions")
+            else:
+                log_info(f"ALLOW read for user {getattr(user, 'name', 'unknown')} (role: {user_role}) on node {simple_node_id}")
+        elif user:
+            log_info(f"READ by user {getattr(user, 'name', 'unknown')} on node {simple_node_id} (no specific permissions)")
+        else:
+            log_info(f"Anonymous READ on node {simple_node_id}")
 
     async def _on_pre_write(self, node, context, value):
-        """Callback for pre-write operations."""
-        user = context.user
-        if user:
-            # Check permissions using our ruleset
-            if self.permission_ruleset.check_validity(user, ua.AttributeIds.Value, context):
-                log_info(f"User {user.username} ({user.role}) writing to node {node}: {value}")
-                return True
+        """Callback for pre-write operations with permission enforcement."""
+        user = getattr(context, 'user', None)
+        node_id = str(node.nodeid)
+        
+        # Extract actual node_id from the full node string if needed
+        if node_id.startswith("ns=") and ";" in node_id:
+            # Extract the part after the last semicolon for comparison
+            node_parts = node_id.split(";")[-1]
+            if "=" in node_parts:
+                simple_node_id = node_parts.split("=", 1)[-1]
             else:
-                log_warn(f"Access denied: User {user.username} ({user.role}) attempted to write to node {node}")
-                return False
+                simple_node_id = node_parts
         else:
-            log_warn(f"Access denied: Anonymous write attempt on node {node}")
-            return False
+            simple_node_id = node_id
+        
+        # Check if we have permissions configured for this node
+        permissions = None
+        for stored_node_id, perms in self.node_permissions.items():
+            if stored_node_id == simple_node_id or stored_node_id.endswith(simple_node_id):
+                permissions = perms
+                break
+        
+        if not user:
+            log_warn(f"DENY write for anonymous user on node {simple_node_id}")
+            raise ua.UaError(f"Access denied: anonymous write not allowed")
+        
+        if permissions and hasattr(user, 'role'):
+            user_role = user.role
+            role_permission = getattr(permissions, user_role, "")
+            
+            if "w" not in role_permission:
+                log_warn(f"DENY write for user {getattr(user, 'name', 'unknown')} (role: {user_role}) on node {simple_node_id}: {value}")
+                raise ua.UaError(f"Access denied: insufficient write permissions")
+            else:
+                log_info(f"ALLOW write for user {getattr(user, 'name', 'unknown')} (role: {user_role}) on node {simple_node_id}: {value}")
+        else:
+            log_info(f"WRITE by user {getattr(user, 'name', 'unknown')} on node {simple_node_id}: {value} (no specific permissions)")
 
     async def create_variable_nodes(self) -> bool:
         """Create OPC-UA nodes for all configured variables, structs and arrays."""
@@ -581,23 +642,32 @@ class OpcuaServer:
         await node.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(var.display_name))))
         await node.write_attribute(ua.AttributeIds.Description, ua.DataValue(ua.Variant(ua.LocalizedText(var.description))))
 
-        # Set access level based on permissions
+        # Set access level based on permissions - if any role has write, enable write
         access_level = ua.AccessLevel.CurrentRead
-        if var.permissions.engineer == "rw" or var.permissions.operator == "rw":
+        has_write_permission = (
+            "w" in var.permissions.viewer or 
+            "w" in var.permissions.operator or 
+            "w" in var.permissions.engineer
+        )
+        if has_write_permission:
             access_level |= ua.AccessLevel.CurrentWrite
 
         await node.write_attribute(ua.AttributeIds.AccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
+        await node.write_attribute(ua.AttributeIds.UserAccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
 
         # Store node mapping
+        access_mode = "readwrite" if has_write_permission else "readonly"
         var_node = VariableNode(
             node=node,
             debug_var_index=var.index,
             datatype=var.datatype,
-            access_mode="readwrite" if access_level & ua.AccessLevel.CurrentWrite else "readonly",
+            access_mode=access_mode,
             is_array_element=False
         )
 
         self.variable_nodes[var.index] = var_node
+        # Store node permissions for runtime checks
+        self.node_permissions[var.node_id] = var.permissions
         print(f"  Created variable: {var.node_id}")
 
     async def _create_struct(self, parent_node: Node, struct: StructVariable) -> None:
@@ -636,23 +706,32 @@ class OpcuaServer:
         # Set display name
         await node.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(field.name))))
 
-        # Set access level based on permissions
+        # Set access level based on permissions - if any role has write, enable write
         access_level = ua.AccessLevel.CurrentRead
-        if field.permissions.engineer == "rw" or field.permissions.operator == "rw":
+        has_write_permission = (
+            "w" in field.permissions.viewer or 
+            "w" in field.permissions.operator or 
+            "w" in field.permissions.engineer
+        )
+        if has_write_permission:
             access_level |= ua.AccessLevel.CurrentWrite
 
         await node.write_attribute(ua.AttributeIds.AccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
+        await node.write_attribute(ua.AttributeIds.UserAccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
 
         # Store node mapping
+        access_mode = "readwrite" if has_write_permission else "readonly"
         var_node = VariableNode(
             node=node,
             debug_var_index=field.index,
             datatype=field.datatype,
-            access_mode="readwrite" if access_level & ua.AccessLevel.CurrentWrite else "readonly",
+            access_mode=access_mode,
             is_array_element=False
         )
 
         self.variable_nodes[field.index] = var_node
+        # Store node permissions for runtime checks
+        self.node_permissions[field_node_id] = field.permissions
         print(f"    Created field: {field_node_id}")
 
     async def _create_array(self, parent_node: Node, arr: ArrayVariable) -> None:
@@ -677,23 +756,32 @@ class OpcuaServer:
         # Set display name and description
         await node.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(arr.display_name))))
 
-        # Set access level based on permissions
+        # Set access level based on permissions - if any role has write, enable write
         access_level = ua.AccessLevel.CurrentRead
-        if arr.permissions.engineer == "rw" or arr.permissions.operator == "rw":
+        has_write_permission = (
+            "w" in arr.permissions.viewer or 
+            "w" in arr.permissions.operator or 
+            "w" in arr.permissions.engineer
+        )
+        if has_write_permission:
             access_level |= ua.AccessLevel.CurrentWrite
 
         await node.write_attribute(ua.AttributeIds.AccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
+        await node.write_attribute(ua.AttributeIds.UserAccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
 
         # Store node mapping
+        access_mode = "readwrite" if has_write_permission else "readonly"
         var_node = VariableNode(
             node=node,
             debug_var_index=arr.index,
             datatype=arr.datatype,
-            access_mode="readwrite" if access_level & ua.AccessLevel.CurrentWrite else "readonly",
+            access_mode=access_mode,
             is_array_element=False
         )
 
         self.variable_nodes[arr.index] = var_node
+        # Store node permissions for runtime checks
+        self.node_permissions[arr.node_id] = arr.permissions
         print(f"  Created array: {arr.node_id}")
 
 
