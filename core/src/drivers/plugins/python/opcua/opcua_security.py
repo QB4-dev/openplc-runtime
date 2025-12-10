@@ -494,15 +494,20 @@ class OpcuaSecurityManager:
     async def _setup_server_certificates_for_asyncua(self, server) -> None:
         """Setup server certificates for asyncua Server."""
         if hasattr(self.config, 'security') and self.config.security.server_certificate_strategy == "auto_self_signed":
-            # Generate self-signed certificate in temp directory and load into server
-            with tempfile.TemporaryDirectory() as temp_dir:
-                key_file = Path(temp_dir) / "server_key.pem"
-                cert_file = Path(temp_dir) / "server_cert.pem"
-                
-                hostname = socket.gethostname()
-                app_uri = getattr(self.config.server, 'application_uri',
-                                  'urn:autonomy-logic:openplc:opcua:server')
-                
+            # Generate self-signed certificate in persistent directory
+            cert_dir = Path(self.plugin_dir) / "certs"
+            cert_dir.mkdir(parents=True, exist_ok=True)
+            
+            key_file = cert_dir / "server_key.pem"
+            cert_file = cert_dir / "server_cert.pem"
+            
+            hostname = socket.gethostname()
+            app_uri = getattr(self.config.server, 'application_uri',
+                              'urn:autonomy-logic:openplc:opcua:server')
+            
+            # Only generate if files don't exist
+            if not cert_file.exists() or not key_file.exists():
+                log_info(f"Generating new self-signed certificate in {cert_dir}")
                 await setup_self_signed_certificate(
                     key_file=key_file,
                     cert_file=cert_file,
@@ -512,41 +517,43 @@ class OpcuaSecurityManager:
                     subject_attrs={}
                 )
                 
-                # Verificar se os arquivos foram criados corretamente
+                # Verify files were created
                 if not cert_file.exists() or not key_file.exists():
                     log_error(f"Certificate files not created: cert={cert_file.exists()}, key={key_file.exists()}")
                     return
                 
                 log_info(f"Certificate files created successfully: {cert_file}, {key_file}")
+            else:
+                log_info(f"Using existing certificate files: {cert_file}, {key_file}")
+            
+            # Load certificate (PEM format works)
+            with open(cert_file, 'rb') as f:
+                cert_data = f.read()
+            
+            # Load private key and convert PEM to DER (asyncua requires DER for keys)
+            with open(key_file, 'rb') as f:
+                pem_key_data = f.read()
+            
+            # Convert private key from PEM to DER for asyncua compatibility
+            from cryptography.hazmat.primitives.serialization import load_pem_private_key
+            try:
+                private_key = load_pem_private_key(pem_key_data, password=None)
+                der_key_data = private_key.private_bytes(
+                    encoding=serialization.Encoding.DER,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption()
+                )
+                log_info(f"Certificate data loaded and converted: cert={len(cert_data)} bytes, key={len(der_key_data)} bytes DER")
                 
-                # Carregar certificado (PEM funciona normalmente)
-                with open(cert_file, 'rb') as f:
-                    cert_data = f.read()
+                # Load certificate and converted key into server
+                await server.load_certificate(cert_data)  # PEM cert works
+                await server.load_private_key(der_key_data)  # DER key required
                 
-                # Carregar chave privada e converter PEM para DER (asyncua requer DER para chaves)
-                with open(key_file, 'rb') as f:
-                    pem_key_data = f.read()
-                
-                # Converter chave privada de PEM para DER para compatibilidade com asyncua
-                from cryptography.hazmat.primitives.serialization import load_pem_private_key
-                try:
-                    private_key = load_pem_private_key(pem_key_data, password=None)
-                    der_key_data = private_key.private_bytes(
-                        encoding=serialization.Encoding.DER,
-                        format=serialization.PrivateFormat.PKCS8,
-                        encryption_algorithm=serialization.NoEncryption()
-                    )
-                    log_info(f"Certificate data loaded and converted: cert={len(cert_data)} bytes, key={len(der_key_data)} bytes DER")
-                    
-                    # Carregar certificado e chave convertida
-                    await server.load_certificate(cert_data)  # PEM cert funciona
-                    await server.load_private_key(der_key_data)  # DER key necessário
-                    
-                except Exception as e:
-                    log_error(f"Failed to convert private key from PEM to DER: {e}")
-                    raise
-                
-                log_info("Self-signed server certificate generated and loaded")
+            except Exception as e:
+                log_error(f"Failed to convert private key from PEM to DER: {e}")
+                raise
+            
+            log_info("Self-signed server certificate loaded successfully")
         
         elif hasattr(self.config, 'security') and self.config.security.server_certificate_custom:
             cert_path = self.config.security.server_certificate_custom

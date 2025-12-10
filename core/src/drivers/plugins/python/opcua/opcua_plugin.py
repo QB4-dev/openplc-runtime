@@ -4,6 +4,7 @@ import asyncio
 import threading
 import time
 import traceback
+import hashlib
 from typing import Optional, Dict, Any, List, Tuple
 
 from asyncua import Server, ua
@@ -173,51 +174,72 @@ class OpenPLCUserManager(UserManager):
 
     def get_user(self, isession, username=None, password=None, certificate=None):
         """Authenticate user with security profile enforcement."""
-        # Get the security profile for this session
+        # Tenta resolver o profile normalmente
         profile = self._get_profile_for_session(isession)
+
+        # FALLBACK: se não conseguir resolver o profile,
+        # tenta cair para o profile "insecure" habilitado
         if not profile:
-            log_error(f"No security profile found for session with policy URI: {getattr(isession, 'security_policy_uri', 'unknown')}")
+            policy_uri = getattr(isession, 'security_policy_uri', None)
+            log_warn(
+                f"No security profile mapped for session (policy_uri={policy_uri}). "
+                "Falling back to 'insecure' profile if available."
+            )
+
+            for p in self.config.server.security_profiles:
+                if p.name == "insecure" and p.enabled:
+                    profile = p
+                    log_info("Using fallback security profile: 'insecure'")
+                    break
+
+        # Se ainda assim não tiver profile, aí sim aborta
+        if not profile:
+            log_error(
+                f"No security profile found for session with policy URI: "
+                f"{getattr(isession, 'security_policy_uri', 'unknown')}"
+            )
             return None
-        
-        # Determine authentication method being used
+
+        # Daqui pra baixo, mantém exatamente como está hoje...
         auth_method = None
         user = None
-        
+
         if username and password:
             auth_method = "Username"
-            # Username/password authentication
             if username in self.users:
                 user_candidate = self.users[username]
-                # Use bcrypt for password verification if available
                 if self._validate_password(password, user_candidate.password_hash):
                     user = user_candidate
         elif certificate:
             auth_method = "Certificate"
-            # Certificate authentication
             cert_id = self._extract_cert_id(certificate)
             if cert_id and cert_id in self.cert_users:
                 user = self.cert_users[cert_id]
         else:
             auth_method = "Anonymous"
-            # Anonymous authentication - create anonymous user if allowed
             if "Anonymous" in profile.auth_methods:
-                # Create a temporary anonymous user for this session
                 from types import SimpleNamespace
                 user = SimpleNamespace()
                 user.username = "anonymous"
-                user.role = "viewer"  # Default anonymous role
-        
-        # Check if auth method is allowed for this profile
+                user.role = "viewer"
+
         if auth_method not in profile.auth_methods:
-            log_warn(f"Authentication method '{auth_method}' not allowed for security profile '{profile.name}'. Allowed methods: {profile.auth_methods}")
+            log_warn(
+                f"Authentication method '{auth_method}' not allowed for security profile "
+                f"'{profile.name}'. Allowed methods: {profile.auth_methods}"
+            )
             return None
-        
-        # If we have a valid user and the method is allowed
+
         if user:
-            log_info(f"User '{getattr(user, 'username', 'anonymous')}' authenticated successfully using '{auth_method}' method for profile '{profile.name}'")
+            log_info(
+                f"User '{getattr(user, 'username', 'anonymous')}' authenticated successfully "
+                f"using '{auth_method}' method for profile '{profile.name}'"
+            )
             return user
         else:
-            log_warn(f"Authentication failed for method '{auth_method}' on profile '{profile.name}'")
+            log_warn(
+                f"Authentication failed for method '{auth_method}' on profile '{profile.name}'"
+            )
             return None
 
     def _extract_cert_id(self, certificate) -> Optional[str]:
@@ -382,10 +404,7 @@ class OpcuaServer:
             # Create server instance with user manager
             self.server = Server(user_manager=self.user_manager)
 
-            # Configure basic server settings
-            await self.server.init()
-            
-            # Set the endpoint URL from configuration with normalization
+            # Set the endpoint URL from configuration with normalization BEFORE init
             try:
                 from .opcua_endpoints_config import normalize_endpoint_url, suggest_client_endpoints
                 normalized_endpoint = normalize_endpoint_url(self.config.server.endpoint_url)
@@ -393,15 +412,31 @@ class OpcuaServer:
                 
                 # Store suggestions for later printing
                 self._client_endpoints = suggest_client_endpoints(normalized_endpoint)
+                log_info(f"Server endpoint set to: {normalized_endpoint}")
             except ImportError:
                 # Fallback if endpoints config is not available
                 self.server.set_endpoint(self.config.server.endpoint_url)
                 self._client_endpoints = {}
+                log_info(f"Server endpoint set to: {self.config.server.endpoint_url}")
             
-            await self.server.set_application_uri(self.config.server.application_uri)
+            # Set server name and URIs BEFORE init
             self.server.set_server_name(self.config.server.name)
+            self.server.application_uri = self.config.server.application_uri
+            
+            # Configure security using SecurityManager BEFORE init
+            await self.security_manager.setup_server_security(self.server, self.config.server.security_profiles)
+            
+            # Setup certificate validation using SecurityManager BEFORE init
+            await self.security_manager.setup_certificate_validation(
+                self.server, 
+                self.config.security.trusted_client_certificates
+            )
 
-            # Set build info
+            # NOW initialize the server
+            await self.server.init()
+            log_info("OPC-UA server initialized")
+
+            # Set build info AFTER init
             from datetime import datetime
             await self.server.set_build_info(
                 product_uri=self.config.server.product_uri,
@@ -412,22 +447,14 @@ class OpcuaServer:
                 build_date=datetime.now()
             )
 
-            # Configure security using SecurityManager
-            await self.security_manager.setup_server_security(self.server, self.config.server.security_profiles)
-            
-            # Setup certificate validation using SecurityManager
-            await self.security_manager.setup_certificate_validation(
-                self.server, 
-                self.config.security.trusted_client_certificates
-            )
-
-            # Register namespace
+            # Register namespace AFTER init
             self.namespace_idx = await self.server.register_namespace(self.config.address_space.namespace_uri)
+            log_info(f"Registered namespace: {self.config.address_space.namespace_uri} (index: {self.namespace_idx})")
 
             # Setup callbacks for auditing
             await self._setup_callbacks()
 
-            log_info(f"OPC-UA server initialized: {self.config.server.endpoint_url}")
+            log_info(f"OPC-UA server setup completed successfully")
             return True
 
         except Exception as e:
