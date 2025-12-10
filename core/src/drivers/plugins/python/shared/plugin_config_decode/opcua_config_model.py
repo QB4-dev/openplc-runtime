@@ -327,6 +327,7 @@ class OpcuaConfig:
     security: SecurityConfig
     users: List[User]
     address_space: AddressSpace
+    cycle_time_ms: int = 100  # Default cycle time in milliseconds
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'OpcuaConfig':
@@ -343,12 +344,14 @@ class OpcuaConfig:
         security = SecurityConfig.from_dict(security_data)
         users = [User.from_dict(user) for user in users_data]
         address_space = AddressSpace.from_dict(address_space_data)
+        cycle_time_ms = data.get("cycle_time_ms", 100)  # Default 100ms if not specified
 
         return cls(
             server=server,
             security=security,
             users=users,
-            address_space=address_space
+            address_space=address_space,
+            cycle_time_ms=cycle_time_ms
         )
 
 @dataclass

@@ -225,6 +225,20 @@ class OpcuaServer:
 
             # Configure basic server settings
             await self.server.init()
+            
+            # Set the endpoint URL from configuration with normalization
+            try:
+                from .opcua_endpoints_config import normalize_endpoint_url, suggest_client_endpoints
+                normalized_endpoint = normalize_endpoint_url(self.config.server.endpoint_url)
+                self.server.set_endpoint(normalized_endpoint)
+                
+                # Store suggestions for later printing
+                self._client_endpoints = suggest_client_endpoints(normalized_endpoint)
+            except ImportError:
+                # Fallback if endpoints config is not available
+                self.server.set_endpoint(self.config.server.endpoint_url)
+                self._client_endpoints = {}
+            
             await self.server.set_application_uri(self.config.server.application_uri)
             self.server.set_server_name(self.config.server.name)
 
@@ -404,8 +418,14 @@ class OpcuaServer:
             import tempfile
             import os
 
-            # Get hostname for certificate
+            # Get hostname for certificate - use multiple names for better connectivity
             hostname = socket.gethostname()
+            hostnames = [hostname, "localhost", "127.0.0.1"]
+            
+            # Extract hostname from endpoint URL if different
+            endpoint_hostname = self.config.server.endpoint_url.split("://")[1].split(":")[0]
+            if endpoint_hostname not in hostnames:
+                hostnames.append(endpoint_hostname)
 
             # Create temporary files for certificate generation
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -417,7 +437,7 @@ class OpcuaServer:
                     key_file=key_file,
                     cert_file=cert_file,
                     app_uri=self.config.server.application_uri,
-                    host_name=hostname,
+                    host_name=hostnames[0],  # Primary hostname
                     cert_use=[],  # Default certificate uses
                     subject_attrs={}  # Default subject attributes
                 )
@@ -813,6 +833,14 @@ class OpcuaServer:
             await self.server.start()
             self.running = True
             print(f"(PASS) OPC-UA server started on {self.config.server.endpoint_url}")
+            
+            # Print alternative endpoints for client connection
+            if hasattr(self, '_client_endpoints'):
+                print("(INFO) Alternative client endpoints:")
+                for scenario, endpoint in self._client_endpoints.items():
+                    if endpoint:
+                        print(f"(INFO)   {scenario}: {endpoint}")
+            
             return True
 
         except Exception as e:
@@ -849,7 +877,9 @@ class OpcuaServer:
 
     async def run_update_loop(self) -> None:
         """Main update loop for synchronizing PLC and OPC-UA data."""
-        cycle_time = self.config.cycle_time_ms / 1000.0
+        # Use cycle_time_ms from config, fallback to 100ms if not available
+        cycle_time_ms = getattr(self.config, 'cycle_time_ms', 100)
+        cycle_time = cycle_time_ms / 1000.0
 
         while self.running and not stop_event.is_set():
             try:
