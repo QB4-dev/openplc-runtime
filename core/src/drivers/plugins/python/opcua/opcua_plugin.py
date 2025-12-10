@@ -167,38 +167,193 @@ class OpenPLCUserManager(UserManager):
         self.config = config
         self.users = {user.username: user for user in config.users if user.type == "password"}
         self.cert_users = {user.certificate_id: user for user in config.users if user.type == "certificate"}
+        
+        # Build security policy URI mapping
+        self._policy_uri_mapping = self._build_policy_uri_mapping()
 
     def get_user(self, isession, username=None, password=None, certificate=None):
-        """Authenticate user."""
+        """Authenticate user with security profile enforcement."""
+        # Get the security profile for this session
+        profile = self._get_profile_for_session(isession)
+        if not profile:
+            log_error(f"No security profile found for session with policy URI: {getattr(isession, 'security_policy_uri', 'unknown')}")
+            return None
+        
+        # Determine authentication method being used
+        auth_method = None
+        user = None
+        
         if username and password:
+            auth_method = "Username"
             # Username/password authentication
             if username in self.users:
-                user = self.users[username]
+                user_candidate = self.users[username]
                 # Use bcrypt for password verification if available
-                try:
-                    import bcrypt
-                    if bcrypt.checkpw(password.encode(), user.password_hash.encode()):
-                        return user
-                except ImportError:
-                    # Fallback to simple comparison (not secure for production)
-                    if password == user.password_hash:
-                        return user
+                if self._validate_password(password, user_candidate.password_hash):
+                    user = user_candidate
         elif certificate:
+            auth_method = "Certificate"
             # Certificate authentication
-            # Extract certificate ID from certificate
             cert_id = self._extract_cert_id(certificate)
-            if cert_id in self.cert_users:
-                return self.cert_users[cert_id]
-
-        return None
+            if cert_id and cert_id in self.cert_users:
+                user = self.cert_users[cert_id]
+        else:
+            auth_method = "Anonymous"
+            # Anonymous authentication - create anonymous user if allowed
+            if "Anonymous" in profile.auth_methods:
+                # Create a temporary anonymous user for this session
+                from types import SimpleNamespace
+                user = SimpleNamespace()
+                user.username = "anonymous"
+                user.role = "viewer"  # Default anonymous role
+        
+        # Check if auth method is allowed for this profile
+        if auth_method not in profile.auth_methods:
+            log_warn(f"Authentication method '{auth_method}' not allowed for security profile '{profile.name}'. Allowed methods: {profile.auth_methods}")
+            return None
+        
+        # If we have a valid user and the method is allowed
+        if user:
+            log_info(f"User '{getattr(user, 'username', 'anonymous')}' authenticated successfully using '{auth_method}' method for profile '{profile.name}'")
+            return user
+        else:
+            log_warn(f"Authentication failed for method '{auth_method}' on profile '{profile.name}'")
+            return None
 
     def _extract_cert_id(self, certificate) -> Optional[str]:
-        """Extract certificate ID from certificate data."""
-        # Simplified - in production, extract from certificate subject or fingerprint
-        for cert_info in self.config.security.trusted_client_certificates:
-            if cert_info["pem"] in str(certificate):
-                return cert_info["id"]
+        """Extract certificate ID using fingerprint matching."""
+        try:
+            # Convert session certificate to fingerprint
+            client_fingerprint = self._cert_to_fingerprint(certificate)
+            if not client_fingerprint:
+                return None
+            
+            # Compare with configured certificate fingerprints
+            for cert_info in self.config.security.trusted_client_certificates:
+                config_fingerprint = self._pem_to_fingerprint(cert_info["pem"])
+                if config_fingerprint and client_fingerprint == config_fingerprint:
+                    log_info(f"Certificate matched: {cert_info['id']} (fingerprint: {client_fingerprint[:16]}...)")
+                    return cert_info["id"]
+            
+            log_warn(f"Certificate not found in trusted list (fingerprint: {client_fingerprint[:16]}...)")
+        except Exception as e:
+            log_error(f"Certificate fingerprint extraction failed: {e}")
+        
         return None
+
+    def _build_policy_uri_mapping(self) -> Dict[str, str]:
+        """Build mapping from OPC-UA security policy URIs to profile names."""
+        # Standard OPC-UA security policy URIs
+        uri_mapping = {}
+        
+        for profile in self.config.server.security_profiles:
+            if not profile.enabled:
+                continue
+                
+            # Map config policy+mode to standard OPC-UA URI
+            policy_uri = self._get_standard_policy_uri(profile.security_policy, profile.security_mode)
+            if policy_uri:
+                uri_mapping[policy_uri] = profile.name
+        
+        log_info(f"Built security policy URI mapping: {uri_mapping}")
+        return uri_mapping
+    
+    def _get_standard_policy_uri(self, security_policy: str, security_mode: str) -> Optional[str]:
+        """Get standard OPC-UA security policy URI for config values."""
+        # Map config values to standard OPC-UA security policy URIs
+        if security_policy == "None" and security_mode == "None":
+            return "http://opcfoundation.org/UA/SecurityPolicy#None"
+        elif security_policy == "Basic256Sha256":
+            return "http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256"
+        elif security_policy == "Aes128_Sha256_RsaOaep":
+            return "http://opcfoundation.org/UA/SecurityPolicy#Aes128_Sha256_RsaOaep"
+        elif security_policy == "Aes256_Sha256_RsaPss":
+            return "http://opcfoundation.org/UA/SecurityPolicy#Aes256_Sha256_RsaPss"
+        else:
+            log_warn(f"Unknown security policy: {security_policy}")
+            return None
+    
+    def _get_profile_for_session(self, isession) -> Optional[object]:
+        """Get security profile for the session based on its security policy URI."""
+        try:
+            policy_uri = getattr(isession, 'security_policy_uri', None)
+            if not policy_uri:
+                log_warn("Session has no security_policy_uri attribute")
+                return None
+            
+            profile_name = self._policy_uri_mapping.get(policy_uri)
+            if not profile_name:
+                log_warn(f"No profile mapping found for policy URI: {policy_uri}")
+                return None
+            
+            # Find the profile object
+            for profile in self.config.server.security_profiles:
+                if profile.name == profile_name and profile.enabled:
+                    return profile
+            
+            log_error(f"Profile '{profile_name}' not found or disabled in configuration")
+            return None
+        except Exception as e:
+            log_error(f"Failed to resolve security profile for session: {e}")
+            return None
+    
+    def _cert_to_fingerprint(self, certificate) -> Optional[str]:
+        """Convert certificate object to SHA256 fingerprint."""
+        try:
+            if hasattr(certificate, 'der'):
+                # Certificate object with der attribute
+                cert_der = certificate.der
+            elif hasattr(certificate, 'data'):
+                # Certificate object with data attribute  
+                cert_der = certificate.data
+            elif isinstance(certificate, bytes):
+                # Raw certificate data
+                cert_der = certificate
+            else:
+                # Try to convert to string and then decode
+                cert_str = str(certificate)
+                if "-----BEGIN CERTIFICATE-----" in cert_str:
+                    # PEM format - extract base64 content
+                    import base64
+                    cert_lines = cert_str.split('\n')
+                    cert_b64 = ''.join([line for line in cert_lines if not line.startswith('-----')])
+                    cert_der = base64.b64decode(cert_b64)
+                else:
+                    log_warn(f"Unknown certificate format: {type(certificate)}")
+                    return None
+            
+            # Calculate SHA256 fingerprint
+            fingerprint = hashlib.sha256(cert_der).hexdigest().upper()
+            return ':'.join(fingerprint[i:i+2] for i in range(0, len(fingerprint), 2))
+        except Exception as e:
+            log_error(f"Failed to extract certificate fingerprint: {e}")
+            return None
+    
+    def _pem_to_fingerprint(self, pem_str: str) -> Optional[str]:
+        """Convert PEM certificate string to SHA256 fingerprint."""
+        try:
+            import base64
+            # Extract base64 content from PEM
+            pem_lines = pem_str.strip().split('\n')
+            cert_b64 = ''.join([line for line in pem_lines if not line.startswith('-----')])
+            cert_der = base64.b64decode(cert_b64)
+            
+            # Calculate SHA256 fingerprint
+            fingerprint = hashlib.sha256(cert_der).hexdigest().upper()
+            return ':'.join(fingerprint[i:i+2] for i in range(0, len(fingerprint), 2))
+        except Exception as e:
+            log_error(f"Failed to convert PEM to fingerprint: {e}")
+            return None
+
+    def _validate_password(self, password: str, password_hash: str) -> bool:
+        """Validate password against hash using bcrypt or fallback."""
+        try:
+            import bcrypt
+            return bcrypt.checkpw(password.encode(), password_hash.encode())
+        except ImportError:
+            # Fallback to simple comparison (not secure for production)
+            log_warn("bcrypt not available, using insecure password comparison")
+            return password == password_hash
 
 
 class OpcuaServer:
@@ -279,12 +434,6 @@ class OpcuaServer:
             log_error(f"Failed to setup OPC-UA server: {e}")
             traceback.print_exc()
             return False
-
-
-
-
-
-
 
     async def _setup_callbacks(self) -> None:
         """Setup callbacks for auditing and access control."""

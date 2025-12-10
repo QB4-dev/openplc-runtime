@@ -499,46 +499,85 @@ class OpcuaSecurityManager:
                 key_file = Path(temp_dir) / "server_key.pem"
                 cert_file = Path(temp_dir) / "server_cert.pem"
                 
-                # Get hostname for certificate
                 hostname = socket.gethostname()
-                app_uri = getattr(self.config.server, 'application_uri', 'urn:autonomy-logic:openplc:opcua:server')
+                app_uri = getattr(self.config.server, 'application_uri',
+                                  'urn:autonomy-logic:openplc:opcua:server')
                 
-                # Generate certificate
                 await setup_self_signed_certificate(
                     key_file=key_file,
                     cert_file=cert_file,
                     app_uri=app_uri,
                     host_name=hostname,
-                    cert_use=[],
+                    cert_use=[ExtendedKeyUsageOID.SERVER_AUTH],
                     subject_attrs={}
                 )
                 
-                # Load certificate data from files
-                with open(cert_file, 'rb') as f:
-                    cert_pem = f.read()
-                with open(key_file, 'rb') as f:
-                    key_pem = f.read()
+                # Verificar se os arquivos foram criados corretamente
+                if not cert_file.exists() or not key_file.exists():
+                    log_error(f"Certificate files not created: cert={cert_file.exists()}, key={key_file.exists()}")
+                    return
                 
-                await server.load_certificate(cert_pem, key_pem)
+                log_info(f"Certificate files created successfully: {cert_file}, {key_file}")
+                
+                # Carregar certificado (PEM funciona normalmente)
+                with open(cert_file, 'rb') as f:
+                    cert_data = f.read()
+                
+                # Carregar chave privada e converter PEM para DER (asyncua requer DER para chaves)
+                with open(key_file, 'rb') as f:
+                    pem_key_data = f.read()
+                
+                # Converter chave privada de PEM para DER para compatibilidade com asyncua
+                from cryptography.hazmat.primitives.serialization import load_pem_private_key
+                try:
+                    private_key = load_pem_private_key(pem_key_data, password=None)
+                    der_key_data = private_key.private_bytes(
+                        encoding=serialization.Encoding.DER,
+                        format=serialization.PrivateFormat.PKCS8,
+                        encryption_algorithm=serialization.NoEncryption()
+                    )
+                    log_info(f"Certificate data loaded and converted: cert={len(cert_data)} bytes, key={len(der_key_data)} bytes DER")
+                    
+                    # Carregar certificado e chave convertida
+                    await server.load_certificate(cert_data)  # PEM cert funciona
+                    await server.load_private_key(der_key_data)  # DER key necessário
+                    
+                except Exception as e:
+                    log_error(f"Failed to convert private key from PEM to DER: {e}")
+                    raise
+                
                 log_info("Self-signed server certificate generated and loaded")
         
         elif hasattr(self.config, 'security') and self.config.security.server_certificate_custom:
-            # Load custom certificate
-            try:
-                cert_path = self.config.security.server_certificate_custom
-                key_path = self.config.security.server_private_key_custom
-                
-                if cert_path and key_path:
-                    await server.load_certificate(cert_path, key_path)
-                    log_info("Custom server certificate loaded")
-                else:
-                    log_warn("Custom certificate paths not fully specified")
-            except Exception as e:
-                log_error(f"Failed to load custom certificate: {e}")
+            cert_path = self.config.security.server_certificate_custom
+            key_path = self.config.security.server_private_key_custom
+            if cert_path and key_path:
+                try:
+                    # Carregar certificado
+                    with open(cert_path, 'rb') as f:
+                        cert_data = f.read()
+                    
+                    # Carregar e converter chave privada de PEM para DER
+                    with open(key_path, 'rb') as f:
+                        pem_key_data = f.read()
+                    
+                    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+                    private_key = load_pem_private_key(pem_key_data, password=None)
+                    der_key_data = private_key.private_bytes(
+                        encoding=serialization.Encoding.DER,
+                        format=serialization.PrivateFormat.PKCS8,
+                        encryption_algorithm=serialization.NoEncryption()
+                    )
+                    
+                    await server.load_certificate(cert_data)
+                    await server.load_private_key(der_key_data)
+                    log_info("Custom server certificate loaded (PEM cert + DER key)")
+                except Exception as e:
+                    log_error(f"Failed to load custom certificate: {e}")
         
         elif self.certificate_data and self.private_key_data:
-            # Use certificates loaded by SecurityManager
-            await server.load_certificate(self.certificate_data, self.private_key_data)
+            await server.load_certificate(self.certificate_data)
+            await server.load_private_key(self.private_key_data)
             log_info("SecurityManager certificates loaded into server")
     
     async def create_trust_store(self, trusted_certificates: List[str]) -> Optional[TrustStore]:
