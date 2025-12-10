@@ -484,12 +484,6 @@ class OpcuaServer:
                 if "r" not in role_permission:
                     log_warn(f"DENY read for user {getattr(user, 'username', 'unknown')} (role: {user_role}) on node {simple_node_id}")
                     raise ua.UaError(f"Access denied: insufficient read permissions")
-                else:
-                    log_info(f"ALLOW read for user {getattr(user, 'username', 'unknown')} (role: {user_role}) on node {simple_node_id}")
-            elif user:
-                log_info(f"READ by user {getattr(user, 'username', 'unknown')} on node {simple_node_id} (no specific permissions)")
-            else:
-                log_info(f"Anonymous READ on node {simple_node_id}")
 
     async def _on_pre_write(self, event, dispatcher):
         """Callback for pre-write operations with permission enforcement."""
@@ -534,10 +528,6 @@ class OpcuaServer:
                 if "w" not in role_permission:
                     log_warn(f"DENY write for user {getattr(user, 'username', 'unknown')} (role: {user_role}) on node {simple_node_id}: {value}")
                     raise ua.UaError(f"Access denied: insufficient write permissions")
-                else:
-                    log_info(f"ALLOW write for user {getattr(user, 'username', 'unknown')} (role: {user_role}) on node {simple_node_id}: {value}")
-            else:
-                log_info(f"WRITE by user {getattr(user, 'username', 'unknown')} on node {simple_node_id}: {value} (no specific permissions)")
 
     async def create_variable_nodes(self) -> bool:
         """Create OPC-UA nodes for all configured variables, structs and arrays."""
