@@ -757,10 +757,17 @@ class OpcuaServer:
         try:
             # Convert value if necessary for OPC-UA format
             opcua_value = convert_value_for_opcua(var_node.datatype, value)
-            await var_node.node.write_value(ua.Variant(opcua_value))
+            
+            # Get the correct OPC-UA type for this variable
+            opcua_type = map_plc_to_opcua_type(var_node.datatype)
+            
+            # Create Variant with explicit type to avoid auto-conversion issues
+            variant = ua.Variant(opcua_value, opcua_type)
+            await var_node.node.write_value(variant)
+            
         except Exception as e:
-            pass
-            # print(f"(FAIL) Failed to update OPC-UA node for debug variable {var_node.debug_var_index}: {e}")
+            # Log the error for debugging type conversion issues
+            log_error(f"Failed to update OPC-UA node for variable {var_node.debug_var_index} (type: {var_node.datatype}): {e}")
 
     async def _initialize_variable_cache(self, indices: List[int]) -> None:
         """Initialize metadata cache for direct memory access."""
@@ -789,10 +796,20 @@ class OpcuaServer:
                 try:
                     # Read current value from OPC-UA node
                     opcua_value = await var_node.node.read_value()
-                    opcua_value = opcua_value.Value  # Extract from Variant
+                    
+                    # Robust reading that checks if opcua_value has Value attribute
+                    if hasattr(opcua_value, "Value"):
+                        original_opcua_value = opcua_value.Value  # Extract from Variant
+                    else:
+                        original_opcua_value = opcua_value
+                    # If opcua_value doesn't have Value attribute, use it directly
 
                     # Convert to PLC format
-                    plc_value = convert_value_for_plc(var_node.datatype, opcua_value)
+                    plc_value = convert_value_for_plc(var_node.datatype, original_opcua_value)
+                    
+                    # Debug logging for type conversion issues
+                    if hasattr(opcua_value, "VariantType") and str(opcua_value.VariantType) != str(map_plc_to_opcua_type(var_node.datatype)):
+                        log_info(f"Type conversion: {var_node.datatype} - OPC-UA type {opcua_value.VariantType} -> PLC value {plc_value} (original: {original_opcua_value})")
 
                     values_to_write.append(plc_value)
                     indices_to_write.append(var_index)
@@ -803,9 +820,29 @@ class OpcuaServer:
 
             # Batch write to PLC if we have values to write
             if values_to_write and indices_to_write:
-                success, msg = self.sba.set_var_values_batch(indices_to_write, values_to_write)
-                if not success:
+                # Combine indices and values into tuples as expected by the method
+                index_value_pairs = list(zip(indices_to_write, values_to_write))
+                results, msg = self.sba.set_var_values_batch(index_value_pairs)
+                
+                # Check if the operation was successful
+                # "Batch write completed" is actually a success message, not an error
+                if msg not in ["Success", "Batch write completed"]:
                     log_error(f"Batch write to PLC failed: {msg}")
+                else:
+                    # Check individual results for any failures
+                    failed_count = 0
+                    for i, (success, individual_msg) in enumerate(results):
+                        if not success:
+                            failed_count += 1
+                            # Only log first few failures to avoid spam
+                            if failed_count <= 3:
+                                log_error(f"Failed to write variable index {indices_to_write[i]}: {individual_msg}")
+                            elif failed_count == 4:
+                                log_error(f"... and {len(results) - 3} more write failures (suppressing further messages)")
+                    
+                    # Log summary if there were failures
+                    if failed_count > 0:
+                        log_error(f"Batch write completed with {failed_count}/{len(results)} failures")
 
         except Exception as e:
             log_error(f"Error in OPC-UA to runtime sync: {e}")
