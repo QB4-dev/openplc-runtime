@@ -4,6 +4,18 @@ import struct
 from typing import Any
 from asyncua import ua
 
+# Import logging functions from the main plugin module
+try:
+    from . import opcua_plugin
+    log_info = opcua_plugin.log_info
+    log_warn = opcua_plugin.log_warn
+    log_error = opcua_plugin.log_error
+except ImportError:
+    # Fallback for direct execution or testing
+    def log_info(msg): print(f"(INFO) {msg}")
+    def log_warn(msg): print(f"(WARN) {msg}")
+    def log_error(msg): print(f"(ERROR) {msg}")
+
 
 def map_plc_to_opcua_type(plc_type: str) -> ua.VariantType:
     """Map plc datatype to OPC-UA VariantType."""
@@ -65,7 +77,7 @@ def convert_value_for_opcua(datatype: str, value: Any) -> Any:
             
     except (ValueError, TypeError, OverflowError) as e:
         # If conversion fails, return a safe default
-        print(f"(WARN) Failed to convert value {value} to OPC-UA format for {datatype}: {e}")
+        log_warn(f"Failed to convert value {value} to OPC-UA format for {datatype}: {e}")
         if datatype.upper() in ["BOOL", "Bool"]:
             return False
         elif datatype.upper() in ["FLOAT", "Float"]:
@@ -122,7 +134,7 @@ def convert_value_for_plc(datatype: str, value: Any) -> Any:
             
     except (ValueError, TypeError, OverflowError) as e:
         # If conversion fails, log and return a safe default
-        print(f"(WARN) Failed to convert value {value} to {datatype}, using default: {e}")
+        log_warn(f"Failed to convert value {value} to {datatype}, using default: {e}")
         if datatype.upper() in ["BOOL", "Bool"]:
             return 0
         elif datatype.upper() in ["FLOAT", "Float"]:

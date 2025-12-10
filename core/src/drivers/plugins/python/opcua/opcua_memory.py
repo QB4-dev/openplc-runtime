@@ -10,6 +10,18 @@ except ImportError:
     # Fallback to absolute imports (when run standalone)
     from opcua_types import VariableMetadata
 
+# Import logging functions from the main plugin module
+try:
+    from . import opcua_plugin
+    log_info = opcua_plugin.log_info
+    log_warn = opcua_plugin.log_warn
+    log_error = opcua_plugin.log_error
+except ImportError:
+    # Fallback for direct execution or testing
+    def log_info(msg): print(f"(INFO) {msg}")
+    def log_warn(msg): print(f"(WARN) {msg}")
+    def log_error(msg): print(f"(ERROR) {msg}")
+
 
 def read_memory_direct(address: int, size: int) -> Any:
     """Read value directly from memory using cached address."""
@@ -45,13 +57,13 @@ def initialize_variable_cache(sba, indices: List[int]) -> Dict[int, VariableMeta
         # Batch: get addresses
         addresses, addr_msg = sba.get_var_list(indices)
         if addr_msg != "Success":
-            print(f"(WARN) Failed to cache addresses: {addr_msg}")
+            log_warn(f"Failed to cache addresses: {addr_msg}")
             return {}
 
         # Batch: get sizes
         sizes, size_msg = sba.get_var_sizes_batch(indices)
         if size_msg != "Success":
-            print(f"(WARN) Failed to cache sizes: {size_msg}")
+            log_warn(f"Failed to cache sizes: {size_msg}")
             return {}
 
         # Create cache
@@ -66,9 +78,9 @@ def initialize_variable_cache(sba, indices: List[int]) -> Dict[int, VariableMeta
                 )
                 cache[var_index] = metadata
 
-        print(f"(PASS) Cached metadata for {len(cache)} variables")
+        log_info(f"Cached metadata for {len(cache)} variables")
         return cache
 
     except Exception as e:
-        print(f"(WARN) Failed to initialize variable cache: {e}")
+        log_warn(f"Failed to initialize variable cache: {e}")
         return {}

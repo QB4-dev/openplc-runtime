@@ -272,11 +272,11 @@ class OpcuaServer:
             # Setup callbacks for auditing
             await self._setup_callbacks()
 
-            print(f"(PASS) OPC-UA server initialized: {self.config.server.endpoint_url}")
+            log_info(f"OPC-UA server initialized: {self.config.server.endpoint_url}")
             return True
 
         except Exception as e:
-            print(f"(FAIL) Failed to setup OPC-UA server: {e}")
+            log_error(f"Failed to setup OPC-UA server: {e}")
             traceback.print_exc()
             return False
 
@@ -309,15 +309,15 @@ class OpcuaServer:
 
         # Register callbacks for all nodes that have any write permissions
         if nodes_requiring_callbacks:
-            print(f"(INFO) Registering callbacks for {len(nodes_requiring_callbacks)} nodes")
+            log_info(f"Registering callbacks for {len(nodes_requiring_callbacks)} nodes")
             try:
                 # Register pre-read and pre-write callbacks with the server
                 from asyncua.common.callback import CallbackType
                 await self.server.iserver.subscribe_server_callback(CallbackType.PreRead, self._on_pre_read)
                 await self.server.iserver.subscribe_server_callback(CallbackType.PreWrite, self._on_pre_write)
-                print(f"(PASS) Successfully registered permission callbacks")
+                log_info("Successfully registered permission callbacks")
             except Exception as e:
-                print(f"(WARN) Failed to register callbacks: {e}")
+                log_warn(f"Failed to register callbacks: {e}")
 
     async def _on_pre_read(self, node, context):
         """Callback for pre-read operations with permission enforcement."""
@@ -399,7 +399,7 @@ class OpcuaServer:
         """Create OPC-UA nodes for all configured variables, structs and arrays."""
         try:
             if not self.server or self.namespace_idx is None:
-                print("(FAIL) Server not initialized")
+                log_error("Server not initialized")
                 return False
 
             # Get the Objects folder
@@ -410,7 +410,7 @@ class OpcuaServer:
                 try:
                     await self._create_simple_variable(objects, var)
                 except Exception as e:
-                    print(f"(FAIL) Error creating variable {var.node_id}: {e}")
+                    log_error(f"Error creating variable {var.node_id}: {e}")
                     traceback.print_exc()
 
             # Create structures
@@ -418,7 +418,7 @@ class OpcuaServer:
                 try:
                     await self._create_struct(objects, struct)
                 except Exception as e:
-                    print(f"(FAIL) Error creating struct {struct.node_id}: {e}")
+                    log_error(f"Error creating struct {struct.node_id}: {e}")
                     traceback.print_exc()
 
             # Create arrays
@@ -426,7 +426,7 @@ class OpcuaServer:
                 try:
                     await self._create_array(objects, arr)
                 except Exception as e:
-                    print(f"(FAIL) Error creating array {arr.node_id}: {e}")
+                    log_error(f"Error creating array {arr.node_id}: {e}")
                     traceback.print_exc()
 
             # Initialize variable metadata cache for direct memory access
@@ -435,17 +435,17 @@ class OpcuaServer:
             if not self.variable_metadata:
                 self._direct_memory_access_enabled = False
 
-            print(f"(PASS) Created {len(self.variable_nodes)} variable nodes")
+            log_info(f"Created {len(self.variable_nodes)} variable nodes")
             return True
 
         except Exception as e:
-            print(f"(FAIL) Failed to create variable nodes: {e}")
+            log_error(f"Failed to create variable nodes: {e}")
             traceback.print_exc()
             return False
 
     async def _create_simple_variable(self, parent_node: Node, var: SimpleVariable) -> None:
         """Create a simple OPC-UA variable node."""
-        print(f"Creating simple variable: {var.node_id} ({var.datatype}, index: {var.index})")
+        # Creating simple variable: {var.node_id} ({var.datatype}, index: {var.index})
 
         opcua_type = map_plc_to_opcua_type(var.datatype)
         initial_value = convert_value_for_opcua(var.datatype, var.initial_value)
@@ -488,11 +488,11 @@ class OpcuaServer:
         self.variable_nodes[var.index] = var_node
         # Store node permissions for runtime checks
         self.node_permissions[var.node_id] = var.permissions
-        print(f"  Created variable: {var.node_id}")
+        # Created variable: {var.node_id}
 
     async def _create_struct(self, parent_node: Node, struct: StructVariable) -> None:
         """Create an OPC-UA struct (object with fields)."""
-        print(f"Creating struct: {struct.node_id}")
+        # Creating struct: {struct.node_id}
 
         # Create parent object for the struct
         struct_obj = await parent_node.add_object(self.namespace_idx, struct.browse_name)
@@ -505,12 +505,12 @@ class OpcuaServer:
         for field in struct.fields:
             await self._create_struct_field(struct_obj, struct.node_id, field)
 
-        print(f"  Created struct with {len(struct.fields)} fields")
+        # Created struct with {len(struct.fields)} fields
 
     async def _create_struct_field(self, parent_node: Node, struct_node_id: str, field: VariableField) -> None:
         """Create a field within a struct."""
         field_node_id = f"{struct_node_id}.{field.name}"
-        print(f"  Creating struct field: {field_node_id} ({field.datatype}, index: {field.index})")
+        # Creating struct field: {field_node_id} ({field.datatype}, index: {field.index})
 
         opcua_type = map_plc_to_opcua_type(field.datatype)
         initial_value = convert_value_for_opcua(field.datatype, field.initial_value)
@@ -552,11 +552,11 @@ class OpcuaServer:
         self.variable_nodes[field.index] = var_node
         # Store node permissions for runtime checks
         self.node_permissions[field_node_id] = field.permissions
-        print(f"    Created field: {field_node_id}")
+        # Created field: {field_node_id}
 
     async def _create_array(self, parent_node: Node, arr: ArrayVariable) -> None:
         """Create an OPC-UA array variable."""
-        print(f"Creating array: {arr.node_id} ({arr.datatype}[{arr.length}], index: {arr.index})")
+        # Creating array: {arr.node_id} ({arr.datatype}[{arr.length}], index: {arr.index})
 
         opcua_type = map_plc_to_opcua_type(arr.datatype)
         initial_value = convert_value_for_opcua(arr.datatype, arr.initial_value)
@@ -602,7 +602,7 @@ class OpcuaServer:
         self.variable_nodes[arr.index] = var_node
         # Store node permissions for runtime checks
         self.node_permissions[arr.node_id] = arr.permissions
-        print(f"  Created array: {arr.node_id}")
+        # Created array: {arr.node_id}
 
 
 
@@ -624,7 +624,7 @@ class OpcuaServer:
                 await self._update_via_batch_operations()
 
         except Exception as e:
-            print(f"(FAIL) Error in optimized update loop: {e}")
+            log_error(f"Error in optimized update loop: {e}")
 
     async def _update_via_direct_memory_access(self) -> None:
         """Direct memory access - ZERO C calls per variable!"""
@@ -637,7 +637,7 @@ class OpcuaServer:
                 await self._update_opcua_node(var_node, value)
 
             except Exception as e:
-                print(f"(FAIL) Direct memory access failed for var {var_index}: {e}")
+                log_error(f"Direct memory access failed for var {var_index}: {e}")
 
     async def _update_via_batch_operations(self) -> None:
         """Fallback: batch operations (still much better than individual)"""
@@ -647,7 +647,7 @@ class OpcuaServer:
         results, msg = self.sba.get_var_values_batch(var_indices)
 
         if msg != "Success":
-            print(f"(FAIL) Batch read failed: {msg}")
+            log_error(f"Batch read failed: {msg}")
             return
 
         # Process results
@@ -658,7 +658,7 @@ class OpcuaServer:
             if var_msg == "Success" and value is not None:
                 await self._update_opcua_node(var_node, value)
             else:
-                print(f"(FAIL) Failed to read variable {var_index}: {var_msg}")
+                log_error(f"Failed to read variable {var_index}: {var_msg}")
 
     async def _update_opcua_node(self, var_node: VariableNode, value: Any) -> None:
         """Update an OPC-UA node with a new value."""
@@ -763,7 +763,7 @@ class OpcuaServer:
                 await asyncio.sleep(0.050)  # 50ms interval
 
             except Exception as e:
-                print(f"(FAIL) Error in OPC-UA to runtime loop: {e}")
+                log_error(f"Error in OPC-UA to runtime loop: {e}")
                 await asyncio.sleep(0.1)  # Brief pause on error
 
 
@@ -772,24 +772,24 @@ class OpcuaServer:
         """Start the OPC-UA server."""
         try:
             if not self.server:
-                print("(FAIL) Server not initialized")
+                log_error("Server not initialized")
                 return False
 
             await self.server.start()
             self.running = True
-            print(f"(PASS) OPC-UA server started on {self.config.server.endpoint_url}")
+            log_info(f"OPC-UA server started on {self.config.server.endpoint_url}")
             
             # Print alternative endpoints for client connection
             if hasattr(self, '_client_endpoints'):
-                print("(INFO) Alternative client endpoints:")
+                log_info("Alternative client endpoints:")
                 for scenario, endpoint in self._client_endpoints.items():
                     if endpoint:
-                        print(f"(INFO)   {scenario}: {endpoint}")
+                        log_info(f"  {scenario}: {endpoint}")
             
             return True
 
         except Exception as e:
-            print(f"(FAIL) Failed to start OPC-UA server: {e}")
+            log_error(f"Failed to start OPC-UA server: {e}")
             return False
 
     def _cleanup_temp_files(self) -> None:
@@ -799,9 +799,9 @@ class OpcuaServer:
                 import os
                 if os.path.exists(cert_path):
                     os.unlink(cert_path)
-                    print(f"(INFO) Cleaned up temp certificate file: {cert_path}")
+                    log_info(f"Cleaned up temp certificate file: {cert_path}")
             except Exception as e:
-                print(f"(WARN) Failed to cleanup temp certificate file {cert_path}: {e}")
+                log_warn(f"Failed to cleanup temp certificate file {cert_path}: {e}")
         self.temp_cert_files.clear()
 
     async def stop_server(self) -> None:
@@ -810,13 +810,13 @@ class OpcuaServer:
             if self.server and self.running:
                 await self.server.stop()
                 self.running = False
-                print("(PASS) OPC-UA server stopped")
+                log_info("OPC-UA server stopped")
             
             # Clean up temporary certificate files
             self._cleanup_temp_files()
 
         except Exception as e:
-            print(f"(FAIL) Error stopping OPC-UA server: {e}")
+            log_error(f"Error stopping OPC-UA server: {e}")
             # Still try to cleanup temp files even if server stop failed
             self._cleanup_temp_files()
 
@@ -832,7 +832,7 @@ class OpcuaServer:
                 await asyncio.sleep(cycle_time)
 
             except Exception as e:
-                print(f"(FAIL) Error in update loop: {e}")
+                log_error(f"Error in update loop: {e}")
                 await asyncio.sleep(1.0)  # Brief pause on error
 
 
@@ -853,7 +853,7 @@ def server_thread_main():
                 return
 
             # Start both update loops in parallel
-            print("(PASS) Starting bidirectional synchronization loops")
+            log_info("Starting bidirectional synchronization loops")
             task_runtime_to_opcua = asyncio.create_task(opcua_server.run_update_loop())
             task_opcua_to_runtime = asyncio.create_task(opcua_server.run_opcua_to_runtime_loop())
 
@@ -861,7 +861,7 @@ def server_thread_main():
             await asyncio.gather(task_runtime_to_opcua, task_opcua_to_runtime)
 
         except Exception as e:
-            print(f"(FAIL) Error in server thread: {e}")
+            log_error(f"Error in server thread: {e}")
         finally:
             if opcua_server:
                 await opcua_server.stop_server()
@@ -878,59 +878,59 @@ def init(args_capsule):
     """
     global runtime_args, opcua_config, safe_buffer_accessor, opcua_server
 
-    print(" OPC-UA Plugin - Initializing...")
+    log_info("OPC-UA Plugin - Initializing...")
 
     try:
         # Extract runtime arguments from capsule
         runtime_args, error_msg = safe_extract_runtime_args_from_capsule(args_capsule)
         if not runtime_args:
-            print(f"(FAIL) Failed to extract runtime args: {error_msg}")
+            log_error(f"Failed to extract runtime args: {error_msg}")
             return False
 
-        print("(PASS) Runtime arguments extracted successfully")
+        log_info("Runtime arguments extracted successfully")
 
         # Create safe buffer accessor
         safe_buffer_accessor = SafeBufferAccess(runtime_args)
         if not safe_buffer_accessor.is_valid:
-            print(f"(FAIL) Failed to create SafeBufferAccess: {safe_buffer_accessor.error_msg}")
+            log_error(f"Failed to create SafeBufferAccess: {safe_buffer_accessor.error_msg}")
             return False
 
-        print("(PASS) SafeBufferAccess created successfully")
+        log_info("SafeBufferAccess created successfully")
 
         # Create safe logging accessor
         global safe_logging_accessor
         safe_logging_accessor = SafeLoggingAccess(runtime_args)
         if not safe_logging_accessor.is_valid:
-            print(f"(WARN) Failed to create SafeLoggingAccess: {safe_logging_accessor.error_msg}")
+            log_warn(f"Failed to create SafeLoggingAccess: {safe_logging_accessor.error_msg}")
             # Continue without logging - not a fatal error
 
         # Load configuration
         config_path, config_error = safe_buffer_accessor.get_config_path()
         if not config_path:
-            print(f"(FAIL) Failed to get config path: {config_error}")
+            log_error(f"Failed to get config path: {config_error}")
             return False
 
-        print(f" Loading configuration from: {config_path}")
+        log_info(f"Loading configuration from: {config_path}")
 
         opcua_config = OpcuaMasterConfig()
         opcua_config.import_config_from_file(config_path)
         opcua_config.validate()
 
-        print(f"(PASS) Configuration loaded successfully: {len(opcua_config.plugins)} plugin(s)")
+        log_info(f"Configuration loaded successfully: {len(opcua_config.plugins)} plugin(s)")
 
         # Initialize server for the first plugin (simplified - assumes single plugin)
         if opcua_config.plugins:
             plugin_config = opcua_config.plugins[0]
             opcua_server = OpcuaServer(plugin_config.config, safe_buffer_accessor)
-            print("(PASS) OPC-UA server instance created")
+            log_info("OPC-UA server instance created")
         else:
-            print("(FAIL) No OPC-UA plugins configured")
+            log_error("No OPC-UA plugins configured")
             return False
 
         return True
 
     except Exception as e:
-        print(f"(FAIL) Error during initialization: {e}")
+        log_error(f"Error during initialization: {e}")
         traceback.print_exc()
         return False
 
@@ -942,11 +942,11 @@ def start_loop():
     """
     global server_thread, opcua_server
 
-    print(" OPC-UA Plugin - Starting main loop...")
+    log_info("OPC-UA Plugin - Starting main loop...")
 
     try:
         if not opcua_server:
-            print("(FAIL) Plugin not properly initialized")
+            log_error("Plugin not properly initialized")
             return False
 
         # Reset stop event
@@ -956,11 +956,11 @@ def start_loop():
         server_thread = threading.Thread(target=server_thread_main, daemon=True)
         server_thread.start()
 
-        print("(PASS) OPC-UA server thread started")
+        log_info("OPC-UA server thread started")
         return True
 
     except Exception as e:
-        print(f"(FAIL) Error starting main loop: {e}")
+        log_error(f"Error starting main loop: {e}")
         traceback.print_exc()
         return False
 
@@ -972,11 +972,11 @@ def stop_loop():
     """
     global server_thread, opcua_server
 
-    print(" OPC-UA Plugin - Stopping main loop...")
+    log_info("OPC-UA Plugin - Stopping main loop...")
 
     try:
         if not server_thread:
-            print(" No server thread to stop")
+            log_warn("No server thread to stop")
             return True
 
         # Signal thread to stop
@@ -986,15 +986,15 @@ def stop_loop():
         if server_thread.is_alive():
             server_thread.join(timeout=5.0)
             if server_thread.is_alive():
-                print(" Server thread did not stop within timeout")
+                log_warn("Server thread did not stop within timeout")
             else:
-                print("(PASS) Server thread stopped successfully")
+                log_info("Server thread stopped successfully")
 
-        print("(PASS) Main loop stopped")
+        log_info("Main loop stopped")
         return True
 
     except Exception as e:
-        print(f"(FAIL) Error stopping main loop: {e}")
+        log_error(f"Error stopping main loop: {e}")
         traceback.print_exc()
         return False
 
@@ -1006,7 +1006,7 @@ def cleanup():
     """
     global runtime_args, opcua_config, safe_buffer_accessor, opcua_server, server_thread
 
-    print(" OPC-UA Plugin - Cleaning up...")
+    log_info("OPC-UA Plugin - Cleaning up...")
 
     try:
         # Stop server if running
@@ -1019,11 +1019,11 @@ def cleanup():
         opcua_server = None
         server_thread = None
 
-        print("(PASS) Cleanup completed successfully")
+        log_info("Cleanup completed successfully")
         return True
 
     except Exception as e:
-        print(f"(FAIL) Error during cleanup: {e}")
+        log_error(f"Error during cleanup: {e}")
         traceback.print_exc()
         return False
 
@@ -1033,6 +1033,3 @@ if __name__ == "__main__":
     Test mode for development purposes.
     This allows running the plugin standalone for testing.
     """
-    print(" OPC-UA Plugin - Test Mode")
-    print("This plugin is designed to be loaded by the OpenPLC runtime.")
-    print("Standalone testing is not fully supported without runtime integration.")

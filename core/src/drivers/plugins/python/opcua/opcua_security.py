@@ -26,6 +26,26 @@ from asyncua import ua
 from cryptography.x509.oid import ExtensionOID, ExtendedKeyUsageOID
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+
+# Import logging functions from the main plugin module
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    pass
+else:
+    # Import logging functions at runtime to avoid circular imports
+    def _import_logging_functions():
+        try:
+            from . import opcua_plugin
+            return opcua_plugin.log_info, opcua_plugin.log_warn, opcua_plugin.log_error
+        except ImportError:
+            # Fallback for direct execution or testing
+            def log_info(msg): print(f"(INFO) {msg}")
+            def log_warn(msg): print(f"(WARN) {msg}")  
+            def log_error(msg): print(f"(ERROR) {msg}")
+            return log_info, log_warn, log_error
+    
+    log_info, log_warn, log_error = _import_logging_functions()
 
 
 class OpcuaSecurityManager:
@@ -93,13 +113,13 @@ class OpcuaSecurityManager:
             # Map security policy
             self.security_policy = self.SECURITY_POLICY_MAPPING.get(self.config.security_policy)
             if self.config.security_policy != "None" and self.security_policy is None:
-                print(f"(FAIL) Unsupported security policy: {self.config.security_policy}")
+                log_error(f"Unsupported security policy: {self.config.security_policy}")
                 return False
 
             # Map security mode
             self.security_mode = self.SECURITY_MODE_MAPPING.get(self.config.security_mode)
             if self.security_mode is None:
-                print(f"(FAIL) Unsupported security mode: {self.config.security_mode}")
+                log_error(f"Unsupported security mode: {self.config.security_mode}")
                 return False
 
             # Load certificates if required
@@ -112,11 +132,11 @@ class OpcuaSecurityManager:
                 if not self._load_trusted_certificates():
                     return False
 
-            print(f"(PASS) Security initialized: policy={self.config.security_policy}, mode={self.config.security_mode}")
+            log_info(f"Security initialized: policy={self.config.security_policy}, mode={self.config.security_mode}")
             return True
 
         except Exception as e:
-            print(f"(FAIL) Failed to initialize security: {e}")
+            log_error(f"Failed to initialize security: {e}")
             return False
 
     async def _ensure_server_certificates(self) -> bool:
@@ -135,9 +155,9 @@ class OpcuaSecurityManager:
 
             # Check if certificates already exist
             if os.path.exists(cert_path) and os.path.exists(key_path):
-                print(f"(PASS) Found existing server certificates in {self.certs_dir}")
+                log_info(f"Found existing server certificates in {self.certs_dir}")
             else:
-                print(f"(INFO) Server certificates not found, generating new ones in {self.certs_dir}")
+                log_info(f"Server certificates not found, generating new ones in {self.certs_dir}")
                 if not await self.generate_server_certificate(cert_path, key_path):
                     return False
 
@@ -145,7 +165,7 @@ class OpcuaSecurityManager:
             return self._load_certificates(cert_path, key_path)
 
         except Exception as e:
-            print(f"(FAIL) Failed to ensure server certificates: {e}")
+            log_error(f"Failed to ensure server certificates: {e}")
             return False
 
     def _load_certificates(self, cert_path: str, key_path: str) -> bool:
@@ -165,17 +185,17 @@ class OpcuaSecurityManager:
                 self.private_key_data = key_file.read()
 
             # Validate certificate format (basic check)
-            if not self._validate_certificate_format():
-                return False
+                if not self._validate_certificate_format():
+                    return False
 
-            print(f"(PASS) Server certificates loaded from {cert_path}")
+            log_info(f"Server certificates loaded from {cert_path}")
             return True
 
         except FileNotFoundError as e:
-            print(f"(FAIL) Certificate file not found: {e}")
+            log_error(f"Certificate file not found: {e}")
             return False
         except Exception as e:
-            print(f"(FAIL) Failed to load certificates: {e}")
+            log_error(f"Failed to load certificates: {e}")
             return False
 
     def _validate_certificate_format(self) -> bool:
@@ -199,13 +219,13 @@ class OpcuaSecurityManager:
                 
                 # Check expiration
                 if cert.not_valid_after < datetime.datetime.now():
-                    print("(WARN) Certificate has expired")
+                    log_warn("Certificate has expired")
                     return False
                 
                 # Check if certificate will expire soon (within 30 days)
                 days_until_expiry = (cert.not_valid_after - datetime.datetime.now()).days
                 if days_until_expiry < 30:
-                    print(f"(WARN) Certificate expires in {days_until_expiry} days")
+                    log_warn(f"Certificate expires in {days_until_expiry} days")
                 
                 # Check for Subject Alternative Name extension
                 try:
@@ -217,48 +237,48 @@ class OpcuaSecurityManager:
                     ip_addresses = [name.value.compressed for name in san_names if isinstance(name, x509.IPAddress)]
                     uris = [name.value for name in san_names if isinstance(name, x509.UniformResourceIdentifier)]
                     
-                    print(f"(INFO) Certificate SAN DNS names: {dns_names}")
-                    print(f"(INFO) Certificate SAN IP addresses: {ip_addresses}")
-                    print(f"(INFO) Certificate SAN URIs: {uris}")
+                    log_info(f"Certificate SAN DNS names: {dns_names}")
+                    log_info(f"Certificate SAN IP addresses: {ip_addresses}")
+                    log_info(f"Certificate SAN URIs: {uris}")
                     
                     # Check if we have expected entries
                     system_hostname = socket.gethostname()
                     if system_hostname not in dns_names and system_hostname != "localhost":
-                        print(f"(WARN) System hostname '{system_hostname}' not found in certificate DNS SANs")
+                        log_warn(f"System hostname '{system_hostname}' not found in certificate DNS SANs")
                     
                     # Check for application URI
                     expected_uri = "urn:autonomy-logic:openplc:opcua:server"
                     if expected_uri not in uris:
-                        print(f"(WARN) Expected application URI '{expected_uri}' not found in certificate")
+                        log_warn(f"Expected application URI '{expected_uri}' not found in certificate")
                     
                 except x509.ExtensionNotFound:
-                    print("(WARN) Certificate missing Subject Alternative Name extension")
+                    log_warn("Certificate missing Subject Alternative Name extension")
                 
                 # Check key usage extensions
                 try:
                     key_usage = cert.extensions.get_extension_for_oid(x509.ExtensionOID.KEY_USAGE).value
                     if not key_usage.digital_signature:
-                        print("(WARN) Certificate lacks digital signature key usage")
+                        log_warn("Certificate lacks digital signature key usage")
                     if not key_usage.key_encipherment:
-                        print("(WARN) Certificate lacks key encipherment usage")
+                        log_warn("Certificate lacks key encipherment usage")
                 except x509.ExtensionNotFound:
-                    print("(WARN) Certificate missing key usage extension")
+                    log_warn("Certificate missing key usage extension")
                 
-                print("(PASS) Certificate format and extensions validated")
+                log_info("Certificate format and extensions validated")
                 return True
                 
             except ImportError:
-                print("(WARN) cryptography library not available for enhanced validation")
+                log_warn("cryptography library not available for enhanced validation")
                 return True  # Fall back to basic validation
                 
         except Exception:
             try:
                 # Try as DER format
                 ssl.DER_cert_to_PEM_cert(self.certificate_data)
-                print("(PASS) Certificate validated as DER format")
+                log_info("Certificate validated as DER format")
                 return True
             except Exception as e:
-                print(f"(FAIL) Invalid certificate format: {e}")
+                log_error(f"Invalid certificate format: {e}")
                 return False
 
     def _load_trusted_certificates(self) -> bool:
@@ -273,7 +293,7 @@ class OpcuaSecurityManager:
 
             if not self.config.client_auth.trusted_certificates_pem:
                 if not self.config.client_auth.trust_all_clients:
-                    print("(WARN) Client authentication enabled but no trusted certificates configured")
+                    log_warn("Client authentication enabled but no trusted certificates configured")
                 return True
 
             # Parse and validate each certificate
@@ -289,17 +309,17 @@ class OpcuaSecurityManager:
                         'hash': cert_hash
                     })
 
-                    print(f"(PASS) Loaded trusted certificate {i+1} (SHA256: {cert_hash})")
+                    log_info(f"Loaded trusted certificate {i+1} (SHA256: {cert_hash})")
 
                 except Exception as e:
-                    print(f"(FAIL) Invalid trusted certificate {i+1}: {e}")
+                    log_error(f"Invalid trusted certificate {i+1}: {e}")
                     return False
 
-            print(f"(PASS) Loaded {len(self.trusted_certificates)} trusted client certificates")
+            log_info(f"Loaded {len(self.trusted_certificates)} trusted client certificates")
             return True
 
         except Exception as e:
-            print(f"(FAIL) Failed to load trusted certificates: {e}")
+            log_error(f"Failed to load trusted certificates: {e}")
             return False
 
     def validate_client_certificate(self, client_cert_pem: str) -> bool:
@@ -319,7 +339,7 @@ class OpcuaSecurityManager:
             return True  # Trust all clients
 
         if not self.trusted_certificates:
-            print("(WARN) Client authentication enabled but no trusted certificates loaded")
+            log_warn("Client authentication enabled but no trusted certificates loaded")
             return False
 
         try:
@@ -330,14 +350,14 @@ class OpcuaSecurityManager:
             # Check if client certificate matches any trusted certificate
             for trusted_cert in self.trusted_certificates:
                 if trusted_cert['der'] == client_cert_der:
-                    print(f"(PASS) Client certificate trusted (SHA256: {client_hash})")
+                    log_info(f"Client certificate trusted (SHA256: {client_hash})")
                     return True
 
-            print(f"(FAIL) Client certificate not trusted (SHA256: {client_hash})")
+            log_error(f"Client certificate not trusted (SHA256: {client_hash})")
             return False
 
         except Exception as e:
-            print(f"(FAIL) Error validating client certificate: {e}")
+            log_error(f"Error validating client certificate: {e}")
             return False
 
     def get_security_settings(self) -> Tuple[Optional[object], int, Optional[bytes], Optional[bytes]]:
@@ -389,7 +409,7 @@ class OpcuaSecurityManager:
                     if parsed.hostname and parsed.hostname != "0.0.0.0":
                         endpoint_hostname = parsed.hostname
                 except Exception as e:
-                    print(f"(WARN) Could not parse endpoint hostname: {e}")
+                    log_warn(f"Could not parse endpoint hostname: {e}")
             
             # Create consistent application URI for Autonomy Logic
             app_uri = "urn:autonomy-logic:openplc:opcua:server"
@@ -412,9 +432,9 @@ class OpcuaSecurityManager:
             if hasattr(self.config, 'endpoint') and "0.0.0.0" in self.config.endpoint:
                 ip_addresses.append("0.0.0.0")
             
-            print(f"(INFO) Generating certificate with DNS SANs: {dns_names}")
-            print(f"(INFO) Generating certificate with IP SANs: {ip_addresses}")
-            print(f"(INFO) Application URI: {app_uri}")
+            log_info(f"Generating certificate with DNS SANs: {dns_names}")
+            log_info(f"Generating certificate with IP SANs: {ip_addresses}")
+            log_info(f"Application URI: {app_uri}")
             
             # Use the setup_self_signed_certificate function from asyncua with supported parameters
             await setup_self_signed_certificate(
@@ -432,11 +452,11 @@ class OpcuaSecurityManager:
                 },
             )
 
-            print(f"(PASS) Server certificate generated with proper SANs: {cert_path}")
+            log_info(f"Server certificate generated with proper SANs: {cert_path}")
             return True
 
         except Exception as e:
-            print(f"(FAIL) Failed to generate server certificate: {e}")
+            log_error(f"Failed to generate server certificate: {e}")
             return False
 
     async def setup_server_security(self, server, security_profiles) -> None:
@@ -458,9 +478,9 @@ class OpcuaSecurityManager:
             
             if policy_type is not None:
                 security_policies.append(policy_type)
-                print(f"(INFO) Added security profile '{profile.name}': {profile.security_policy}/{profile.security_mode} -> {policy_type}")
+                log_info(f"Added security profile '{profile.name}': {profile.security_policy}/{profile.security_mode} -> {policy_type}")
             else:
-                print(f"(WARN) Unsupported security policy/mode combination '{profile.security_policy}/{profile.security_mode}' for profile '{profile.name}', skipping")
+                log_warn(f"Unsupported security policy/mode combination '{profile.security_policy}/{profile.security_mode}' for profile '{profile.name}', skipping")
         
         if security_policies:
             server.set_security_policy(security_policies)
@@ -500,7 +520,7 @@ class OpcuaSecurityManager:
                     key_pem = f.read()
                 
                 await server.load_certificate(cert_pem, key_pem)
-                print("(PASS) Self-signed server certificate generated and loaded")
+                log_info("Self-signed server certificate generated and loaded")
         
         elif hasattr(self.config, 'security') and self.config.security.server_certificate_custom:
             # Load custom certificate
@@ -510,16 +530,16 @@ class OpcuaSecurityManager:
                 
                 if cert_path and key_path:
                     await server.load_certificate(cert_path, key_path)
-                    print("(PASS) Custom server certificate loaded")
+                    log_info("Custom server certificate loaded")
                 else:
-                    print("(WARN) Custom certificate paths not fully specified")
+                    log_warn("Custom certificate paths not fully specified")
             except Exception as e:
-                print(f"(FAIL) Failed to load custom certificate: {e}")
+                log_error(f"Failed to load custom certificate: {e}")
         
         elif self.certificate_data and self.private_key_data:
             # Use certificates loaded by SecurityManager
             await server.load_certificate(self.certificate_data, self.private_key_data)
-            print("(PASS) SecurityManager certificates loaded into server")
+            log_info("SecurityManager certificates loaded into server")
     
     async def create_trust_store(self, trusted_certificates: List[str]) -> Optional[TrustStore]:
         """Create and configure TrustStore with trusted client certificates.
@@ -544,30 +564,30 @@ class OpcuaSecurityManager:
                     cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
                     
                     # Convert to DER format and save to temporary file
-                    cert_der = cert.public_bytes(encoding=x509.Encoding.DER)
+                    cert_der = cert.public_bytes(encoding=serialization.Encoding.DER)
                     
                     cert_file = os.path.join(temp_dir, f"trusted_cert_{i}.der")
                     with open(cert_file, 'wb') as f:
                         f.write(cert_der)
                     
                     cert_files.append(cert_file)
-                    print(f"(INFO) Added trusted certificate {i+1} to trust store")
+                    log_info(f"Added trusted certificate {i+1} to trust store")
                     
                 except Exception as e:
-                    print(f"(WARN) Failed to process trusted certificate {i+1}: {e}")
+                    log_warn(f"Failed to process trusted certificate {i+1}: {e}")
             
             if cert_files:
                 # Create TrustStore with certificate files
                 trust_store = TrustStore(cert_files, [])
                 await trust_store.load()
-                print(f"(PASS) TrustStore created with {len(cert_files)} certificates")
+                log_info(f"TrustStore created with {len(cert_files)} certificates")
                 return trust_store
             else:
-                print("(WARN) No valid trusted certificates processed")
+                log_warn("No valid trusted certificates processed")
                 return None
                 
         except Exception as e:
-            print(f"(FAIL) Failed to create TrustStore: {e}")
+            log_error(f"Failed to create TrustStore: {e}")
             return None
     
     async def setup_certificate_validation(self, server, trusted_certificates) -> None:
@@ -593,7 +613,7 @@ class OpcuaSecurityManager:
             # Create trust store
             trust_store = await self.create_trust_store(cert_pems)
             if not trust_store:
-                print("(FAIL) Could not create trust store")
+                log_error("Could not create trust store")
                 return
             
             # Create certificate validator
@@ -601,7 +621,7 @@ class OpcuaSecurityManager:
             
             # Set validator on server
             server.set_certificate_validator(cert_validator)
-            print("(PASS) Certificate validation configured")
+            log_info("Certificate validation configured")
             
         except Exception as e:
-            print(f"(FAIL) Failed to setup certificate validation: {e}")
+            log_error(f"Failed to setup certificate validation: {e}")
