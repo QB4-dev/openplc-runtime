@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 unsigned long long *ext_common_ticktime__ = NULL;
@@ -52,6 +53,19 @@ void set_realtime_priority(void)
     else 
     {
         log_info("Scheduler set to SCHED_FIFO, priority %d", param.sched_priority);
+    }
+}
+
+// Lock all memory pages to prevent page faults during PLC execution
+void lock_memory(void)
+{
+    if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0)
+    {
+        log_error("mlockall failed: %s", strerror(errno));
+    }
+    else
+    {
+        log_info("Memory locked successfully (MCL_CURRENT | MCL_FUTURE)");
     }
 }
 

@@ -23,8 +23,9 @@ void *plc_cycle_thread(void *arg)
 {
     PluginManager *pm = (PluginManager *)arg;
 
-    // Initialize PLC
+    // Initialize PLC with real-time optimizations
     set_realtime_priority();
+    lock_memory();
     symbols_init(pm);
     ext_config_init__();
     ext_glueVars();
