@@ -119,38 +119,45 @@ class OpenPLCUserManager(UserManager):
 
     def get_user(self, isession, username=None, password=None, certificate=None):
         """Authenticate user with security profile enforcement."""
-        # Tenta resolver o profile normalmente
+        # Detect authentication method first
+        auth_method = self._detect_auth_method(username, password, certificate)
+        log_info(f"Authentication attempt detected: method={auth_method}")
+
+        # Try to resolve the profile normally
         profile = self._get_profile_for_session(isession)
 
-        # FALLBACK: se não conseguir resolver o profile,
-        # tenta cair para o profile "insecure" habilitado
+        # FALLBACK: if cannot resolve profile, try to find one that supports the auth method
         if not profile:
             policy_uri = getattr(isession, 'security_policy_uri', None)
             log_warn(
                 f"No security profile mapped for session (policy_uri={policy_uri}). "
-                "Falling back to 'insecure' profile if available."
+                f"Attempting fallback using auth method: {auth_method}"
             )
 
-            for p in self.config.server.security_profiles:
-                if p.name == "insecure" and p.enabled:
-                    profile = p
-                    log_info("Using fallback security profile: 'insecure'")
-                    break
+            # Try to find a profile that supports this authentication method
+            profile = self._find_profile_by_auth_method(auth_method)
+            
+            if profile:
+                log_info(f"Using fallback security profile: '{profile.name}' (supports {auth_method})")
+            else:
+                log_error(
+                    f"No security profile found that supports authentication method '{auth_method}'. "
+                    f"Session policy URI: {policy_uri}"
+                )
+                return None
 
-        # Se ainda assim não tiver profile, aí sim aborta
-        if not profile:
+        # Validate that the profile supports the authentication method
+        if auth_method not in profile.auth_methods:
             log_error(
-                f"No security profile found for session with policy URI: "
-                f"{getattr(isession, 'security_policy_uri', 'unknown')}"
+                f"Authentication method '{auth_method}' not allowed for security profile "
+                f"'{profile.name}'. Allowed methods: {profile.auth_methods}"
             )
             return None
 
-        # Daqui pra baixo, mantém exatamente como está hoje...
-        auth_method = None
+        # Authenticate based on method
         user = None
 
-        if username and password:
-            auth_method = "Username"
+        if auth_method == "Username" and username and password:
             if username in self.users:
                 user_candidate = self.users[username]
                 if self._validate_password(password, user_candidate.password_hash):
@@ -158,29 +165,31 @@ class OpenPLCUserManager(UserManager):
                     # Add asyncua-compatible role and preserve OpenPLC role
                     user.openplc_role = user.role
                     user.role = self.ROLE_MAPPING.get(user.openplc_role, UserRole.User)
-        elif certificate:
-            auth_method = "Certificate"
+                else:
+                    log_warn(f"Password validation failed for user '{username}'")
+            else:
+                log_warn(f"User '{username}' not found in configuration")
+
+        elif auth_method == "Certificate" and certificate:
             cert_id = self._extract_cert_id(certificate)
             if cert_id and cert_id in self.cert_users:
                 user = self.cert_users[cert_id]
                 # Add asyncua-compatible role and preserve OpenPLC role
                 user.openplc_role = user.role
                 user.role = self.ROLE_MAPPING.get(user.openplc_role, UserRole.User)
-        else:
-            auth_method = "Anonymous"
+                log_info(f"Certificate authenticated as user with role '{user.openplc_role}'")
+            else:
+                log_warn(f"Certificate not found in trusted certificates (cert_id={cert_id})")
+
+        elif auth_method == "Anonymous":
             if "Anonymous" in profile.auth_methods:
                 from types import SimpleNamespace
                 user = SimpleNamespace()
                 user.username = "anonymous"
                 user.openplc_role = "viewer"
                 user.role = UserRole.User  # Map to asyncua UserRole enum
-
-        if auth_method not in profile.auth_methods:
-            log_warn(
-                f"Authentication method '{auth_method}' not allowed for security profile "
-                f"'{profile.name}'. Allowed methods: {profile.auth_methods}"
-            )
-            return None
+            else:
+                log_warn("Anonymous authentication not allowed for this profile")
 
         if user:
             log_info(
@@ -319,6 +328,27 @@ class OpenPLCUserManager(UserManager):
             log_error(f"Failed to convert PEM to fingerprint: {e}")
             return None
 
+    def _detect_auth_method(self, username: Optional[str], password: Optional[str], certificate: Optional[object]) -> str:
+        """Detect which authentication method is being used."""
+        if certificate:
+            return "Certificate"
+        elif username and password:
+            return "Username"
+        else:
+            return "Anonymous"
+
+    def _find_profile_by_auth_method(self, auth_method: str) -> Optional[object]:
+        """Find a security profile that supports the given authentication method."""
+        for profile in self.config.server.security_profiles:
+            if not profile.enabled:
+                continue
+            if auth_method in profile.auth_methods:
+                log_info(f"Found profile '{profile.name}' supporting {auth_method}")
+                return profile
+        
+        log_warn(f"No enabled profile found supporting authentication method: {auth_method}")
+        return None
+
     def _validate_password(self, password: str, password_hash: str) -> bool:
         """Validate password against hash using bcrypt or fallback."""
         try:
@@ -375,7 +405,12 @@ class OpcuaServer:
             self.server.application_uri = self.config.server.application_uri
             
             # Configure security using SecurityManager BEFORE init
-            await self.security_manager.setup_server_security(self.server, self.config.server.security_profiles)
+            # Pass the application_uri from config to ensure certificate matches
+            await self.security_manager.setup_server_security(
+                self.server, 
+                self.config.server.security_profiles,
+                app_uri=self.config.server.application_uri
+            )
             
             # Setup certificate validation using SecurityManager BEFORE init
             await self.security_manager.setup_certificate_validation(

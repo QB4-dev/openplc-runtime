@@ -380,7 +380,8 @@ class OpcuaSecurityManager:
         key_path: str,
         common_name: str = "OpenPLC OPC-UA Server",
         key_size: int = 2048,
-        valid_days: int = 365
+        valid_days: int = 365,
+        app_uri: str = None
     ) -> bool:
         """
         Generate a self-signed certificate for the server with proper SAN extensions.
@@ -391,6 +392,7 @@ class OpcuaSecurityManager:
             common_name: Common name for the certificate
             key_size: RSA key size
             valid_days: Certificate validity period
+            app_uri: Application URI for the certificate (from config)
 
         Returns:
             bool: True if certificate generated successfully
@@ -411,8 +413,9 @@ class OpcuaSecurityManager:
                 except Exception as e:
                     log_warn(f"Could not parse endpoint hostname: {e}")
             
-            # Create consistent application URI for Autonomy Logic
-            app_uri = "urn:autonomy-logic:openplc:opcua:server"
+            # Use provided app_uri or fallback to default
+            if not app_uri:
+                app_uri = "urn:autonomy-logic:openplc:opcua:server"
             
             # Collect all possible hostnames for SAN DNS entries
             dns_names = []
@@ -459,12 +462,13 @@ class OpcuaSecurityManager:
             log_error(f"Failed to generate server certificate: {e}")
             return False
 
-    async def setup_server_security(self, server, security_profiles) -> None:
+    async def setup_server_security(self, server, security_profiles, app_uri: str = None) -> None:
         """Setup security policies and certificates for asyncua Server.
         
         Args:
             server: asyncua Server instance
             security_profiles: List of security profiles from config
+            app_uri: Application URI for the certificate (from config)
         """
         # Setup security policies
         security_policies = []
@@ -489,10 +493,15 @@ class OpcuaSecurityManager:
             server.set_security_policy([ua.SecurityPolicyType.NoSecurity])
         
         # Setup server certificates if needed
-        await self._setup_server_certificates_for_asyncua(server)
+        await self._setup_server_certificates_for_asyncua(server, app_uri)
     
-    async def _setup_server_certificates_for_asyncua(self, server) -> None:
-        """Setup server certificates for asyncua Server."""
+    async def _setup_server_certificates_for_asyncua(self, server, app_uri: str = None) -> None:
+        """Setup server certificates for asyncua Server.
+        
+        Args:
+            server: asyncua Server instance
+            app_uri: Application URI for the certificate (from config)
+        """
         if hasattr(self.config, 'security') and self.config.security.server_certificate_strategy == "auto_self_signed":
             # Generate self-signed certificate in persistent directory
             cert_dir = Path(self.plugin_dir) / "certs"
@@ -502,8 +511,10 @@ class OpcuaSecurityManager:
             cert_file = cert_dir / "server_cert.pem"
             
             hostname = socket.gethostname()
-            app_uri = getattr(self.config.server, 'application_uri',
-                              'urn:autonomy-logic:openplc:opcua:server')
+            # Use provided app_uri or fallback to config value
+            if not app_uri:
+                app_uri = getattr(self.config.server, 'application_uri',
+                                  'urn:autonomy-logic:openplc:opcua:server')
             
             # Only generate if files don't exist
             if not cert_file.exists() or not key_file.exists():
