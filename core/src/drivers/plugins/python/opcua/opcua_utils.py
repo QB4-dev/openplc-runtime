@@ -20,16 +20,16 @@ except ImportError:
 def map_plc_to_opcua_type(plc_type: str) -> ua.VariantType:
     """Map plc datatype to OPC-UA VariantType."""
     type_mapping = {
-        "Bool": ua.VariantType.Boolean,
-        "Byte": ua.VariantType.Byte,
-        "Int": ua.VariantType.UInt16,
-        "Int32": ua.VariantType.UInt32,  # Added Int32 mapping
-        "Dint": ua.VariantType.UInt32,
-        "Lint": ua.VariantType.UInt64,
-        "Float": ua.VariantType.Float,
-        "String": ua.VariantType.String,
+        "BOOL": ua.VariantType.Boolean,
+        "BYTE": ua.VariantType.Byte,
+        "INT": ua.VariantType.Int16,
+        "INT32": ua.VariantType.Int32,
+        "DINT": ua.VariantType.Int32,
+        "LINT": ua.VariantType.Int64,
+        "FLOAT": ua.VariantType.Float,
+        "STRING": ua.VariantType.String,
     }
-    mapped_type = type_mapping.get(plc_type, ua.VariantType.Variant)
+    mapped_type = type_mapping.get(plc_type.upper(), ua.VariantType.Variant)
     return mapped_type
 
 

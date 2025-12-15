@@ -481,6 +481,30 @@ class OpcuaServer:
         except Exception as e:
             log_error(f"Error during endpoint verification: {e}")
 
+    def _check_write_permission(self, permissions) -> bool:
+        """Check if any role has write permission with proper error handling."""
+        try:
+            if not permissions:
+                log_warn("No permissions object provided, defaulting to read-only")
+                return False
+            
+            # Check each role for write permission
+            viewer_perm = getattr(permissions, 'viewer', '')
+            operator_perm = getattr(permissions, 'operator', '')
+            engineer_perm = getattr(permissions, 'engineer', '')
+            
+            has_write = (
+                (viewer_perm and 'w' in str(viewer_perm)) or
+                (operator_perm and 'w' in str(operator_perm)) or
+                (engineer_perm and 'w' in str(engineer_perm))
+            )
+            
+            return bool(has_write)
+            
+        except (AttributeError, TypeError) as e:
+            log_warn(f"Invalid permissions object: {e}, defaulting to read-only")
+            return False
+
     async def _setup_callbacks(self) -> None:
         """Setup callbacks for auditing and access control."""
         # Get all nodes that need callbacks (readwrite variables)
@@ -667,18 +691,10 @@ class OpcuaServer:
         await node.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(var.display_name), ua.VariantType.LocalizedText)))
         await node.write_attribute(ua.AttributeIds.Description, ua.DataValue(ua.Variant(ua.LocalizedText(var.description), ua.VariantType.LocalizedText)))
 
-        # Set access level based on permissions - if any role has write, enable write
-        access_level = ua.AccessLevel.CurrentRead
-        has_write_permission = (
-            "w" in var.permissions.viewer or 
-            "w" in var.permissions.operator or 
-            "w" in var.permissions.engineer
-        )
+        # Set writable permissions using asyncua built-in method
+        has_write_permission = self._check_write_permission(var.permissions)
         if has_write_permission:
-            access_level |= ua.AccessLevel.CurrentWrite
-
-        await node.write_attribute(ua.AttributeIds.AccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
-        await node.write_attribute(ua.AttributeIds.UserAccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
+            await node.set_writable()
 
         # Store node mapping
         access_mode = "readwrite" if has_write_permission else "readonly"
@@ -731,18 +747,10 @@ class OpcuaServer:
         # Set display name
         await node.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(field.name), ua.VariantType.LocalizedText)))
 
-        # Set access level based on permissions - if any role has write, enable write
-        access_level = ua.AccessLevel.CurrentRead
-        has_write_permission = (
-            "w" in field.permissions.viewer or 
-            "w" in field.permissions.operator or 
-            "w" in field.permissions.engineer
-        )
+        # Set writable permissions using asyncua built-in method
+        has_write_permission = self._check_write_permission(field.permissions)
         if has_write_permission:
-            access_level |= ua.AccessLevel.CurrentWrite
-
-        await node.write_attribute(ua.AttributeIds.AccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
-        await node.write_attribute(ua.AttributeIds.UserAccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
+            await node.set_writable()
 
         # Store node mapping
         access_mode = "readwrite" if has_write_permission else "readonly"
@@ -781,18 +789,10 @@ class OpcuaServer:
         # Set display name and description
         await node.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(arr.display_name), ua.VariantType.LocalizedText)))
 
-        # Set access level based on permissions - if any role has write, enable write
-        access_level = ua.AccessLevel.CurrentRead
-        has_write_permission = (
-            "w" in arr.permissions.viewer or 
-            "w" in arr.permissions.operator or 
-            "w" in arr.permissions.engineer
-        )
+        # Set writable permissions using asyncua built-in method
+        has_write_permission = self._check_write_permission(arr.permissions)
         if has_write_permission:
-            access_level |= ua.AccessLevel.CurrentWrite
-
-        await node.write_attribute(ua.AttributeIds.AccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
-        await node.write_attribute(ua.AttributeIds.UserAccessLevel, ua.DataValue(ua.Variant(access_level, ua.VariantType.Byte)))
+            await node.set_writable()
 
         # Store node mapping
         access_mode = "readwrite" if has_write_permission else "readonly"
@@ -866,21 +866,15 @@ class OpcuaServer:
                 log_error(f"Failed to read variable {var_index}: {var_msg}")
 
     async def _update_opcua_node(self, var_node: VariableNode, value: Any) -> None:
-        """Update an OPC-UA node with a new value."""
+        """Update an OPC-UA node with a new value with proper type conversion."""
         try:
-            # Convert value if necessary for OPC-UA format
+            # Convert value to the correct OPC-UA type for this node
             opcua_value = convert_value_for_opcua(var_node.datatype, value)
             
-            # Get the correct OPC-UA type for this variable
-            opcua_type = map_plc_to_opcua_type(var_node.datatype)
-            
-            # Create Variant with explicit type to avoid auto-conversion issues
-            variant = ua.Variant(opcua_value, opcua_type)
-            await var_node.node.write_value(variant)
-            
+            # Write the converted value - asyncua will handle Variant creation
+            await var_node.node.write_value(opcua_value)
         except Exception as e:
-            # Log the error for debugging type conversion issues
-            log_error(f"Failed to update OPC-UA node for variable {var_node.debug_var_index} (type: {var_node.datatype}): {e}")
+            log_error(f"Failed to update OPC-UA node {var_node.debug_var_index}: {e}")
 
     async def _initialize_variable_cache(self, indices: List[int]) -> None:
         """Initialize metadata cache for direct memory access."""
