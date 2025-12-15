@@ -487,13 +487,20 @@ class OpcuaSecurityManager:
                 log_warn(f"Unsupported security policy/mode combination '{profile.security_policy}/{profile.security_mode}' for profile '{profile.name}', skipping")
         
         if security_policies:
+            log_info(f"=== SECURITY MANAGER DEBUG ===")
+            log_info(f"Setting {len(security_policies)} security policies: {security_policies}")
             server.set_security_policy(security_policies)
+            log_info(f"Security policies applied to server successfully")
+            log_info(f"=== END SECURITY MANAGER DEBUG ===")
         else:
             # Default to no security if no profiles enabled
+            log_warn("No security profiles enabled, defaulting to NoSecurity")
             server.set_security_policy([ua.SecurityPolicyType.NoSecurity])
         
         # Setup server certificates if needed
+        log_info("=== CERTIFICATE SETUP DEBUG ===")
         await self._setup_server_certificates_for_asyncua(server, app_uri)
+        log_info("=== END CERTIFICATE SETUP DEBUG ===")
     
     async def _setup_server_certificates_for_asyncua(self, server, app_uri: str = None) -> None:
         """Setup server certificates for asyncua Server.
@@ -519,6 +526,8 @@ class OpcuaSecurityManager:
             # Only generate if files don't exist
             if not cert_file.exists() or not key_file.exists():
                 log_info(f"Generating new self-signed certificate in {cert_dir}")
+                log_info(f"Certificate will be created for app_uri: {app_uri}")
+                log_info(f"Certificate will be created for hostname: {hostname}")
                 await setup_self_signed_certificate(
                     key_file=key_file,
                     cert_file=cert_file,
@@ -538,10 +547,13 @@ class OpcuaSecurityManager:
                 log_info(f"Using existing certificate files: {cert_file}, {key_file}")
             
             # Load certificate (PEM format works)
+            log_info(f"Loading server certificate from: {cert_file}")
             with open(cert_file, 'rb') as f:
                 cert_data = f.read()
+            log_info(f"Certificate loaded: {len(cert_data)} bytes")
             
             # Load private key and convert PEM to DER (asyncua requires DER for keys)
+            log_info(f"Loading server private key from: {key_file}")
             with open(key_file, 'rb') as f:
                 pem_key_data = f.read()
             
@@ -557,14 +569,16 @@ class OpcuaSecurityManager:
                 log_info(f"Certificate data loaded and converted: cert={len(cert_data)} bytes, key={len(der_key_data)} bytes DER")
                 
                 # Load certificate and converted key into server
+                log_info(f"Loading certificate into asyncua server: {len(cert_data)} bytes")
                 await server.load_certificate(cert_data)  # PEM cert works
+                log_info(f"Loading private key into asyncua server: {len(der_key_data)} bytes (DER format)")
                 await server.load_private_key(der_key_data)  # DER key required
                 
             except Exception as e:
                 log_error(f"Failed to convert private key from PEM to DER: {e}")
                 raise
             
-            log_info("Self-signed server certificate loaded successfully")
+            log_info("Self-signed server certificate loaded successfully into asyncua server")
         
         elif hasattr(self.config, 'security') and self.config.security.server_certificate_custom:
             cert_path = self.config.security.server_certificate_custom

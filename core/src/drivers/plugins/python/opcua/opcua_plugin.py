@@ -259,9 +259,17 @@ class OpenPLCUserManager(UserManager):
     def _get_profile_for_session(self, isession) -> Optional[object]:
         """Get security profile for the session based on its security policy URI."""
         try:
+            # DEBUG: Log all session attributes
+            session_attrs = [attr for attr in dir(isession) if not attr.startswith('_')]
+            log_info(f"Session attributes: {session_attrs}")
+            
             policy_uri = getattr(isession, 'security_policy_uri', None)
             if not policy_uri:
                 log_warn("Session has no security_policy_uri attribute")
+                # DEBUG: Try alternative attributes
+                for attr in ['security_policy', 'policy_uri', 'endpoint_url']:
+                    if hasattr(isession, attr):
+                        log_info(f"Session has {attr}: {getattr(isession, attr)}")
                 return None
             
             profile_name = self._policy_uri_mapping.get(policy_uri)
@@ -448,6 +456,31 @@ class OpcuaServer:
             traceback.print_exc()
             return False
 
+    async def _debug_endpoints(self) -> None:
+        """Debug method to verify endpoint configuration after server initialization."""
+        try:
+            log_info("=== ENDPOINT VERIFICATION ===")
+            endpoints = await self.server.get_endpoints()
+            log_info(f"Total endpoints created: {len(endpoints)}")
+            
+            for i, endpoint in enumerate(endpoints):
+                log_info(f"Endpoint {i+1}:")
+                log_info(f"  URL: {endpoint.EndpointUrl}")
+                log_info(f"  Security Policy URI: {endpoint.SecurityPolicyUri}")
+                log_info(f"  Security Mode: {endpoint.SecurityMode}")
+                log_info(f"  Server Certificate: {len(endpoint.ServerCertificate) if endpoint.ServerCertificate else 0} bytes")
+                
+                # List user identity tokens
+                log_info(f"  User Identity Tokens: {len(endpoint.UserIdentityTokens)}")
+                for j, token in enumerate(endpoint.UserIdentityTokens):
+                    log_info(f"    Token {j+1}: {token.TokenType}, Policy: {token.PolicyId}")
+                    if hasattr(token, 'SecurityPolicyUri'):
+                        log_info(f"    Token Security Policy: {token.SecurityPolicyUri}")
+            
+            log_info("=== END ENDPOINT VERIFICATION ===")
+        except Exception as e:
+            log_error(f"Error during endpoint verification: {e}")
+
     async def _setup_callbacks(self) -> None:
         """Setup callbacks for auditing and access control."""
         # Get all nodes that need callbacks (readwrite variables)
@@ -475,9 +508,12 @@ class OpcuaServer:
             try:
                 # Register pre-read and pre-write callbacks with the server
                 from asyncua.common.callback import CallbackType
-                await self.server.iserver.subscribe_server_callback(CallbackType.PreRead, self._on_pre_read)
-                await self.server.iserver.subscribe_server_callback(CallbackType.PreWrite, self._on_pre_write)
-                log_info("Successfully registered permission callbacks")
+                if self.server.iserver is not None:
+                    await self.server.iserver.subscribe_server_callback(CallbackType.PreRead, self._on_pre_read)
+                    await self.server.iserver.subscribe_server_callback(CallbackType.PreWrite, self._on_pre_write)
+                    log_info("Successfully registered permission callbacks")
+                else:
+                    log_warn("Server iserver is None, cannot register callbacks")
             except Exception as e:
                 log_warn(f"Failed to register callbacks: {e}")
 
@@ -628,8 +664,8 @@ class OpcuaServer:
         )
 
         # Set display name and description
-        await node.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(var.display_name))))
-        await node.write_attribute(ua.AttributeIds.Description, ua.DataValue(ua.Variant(ua.LocalizedText(var.description))))
+        await node.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(var.display_name), ua.VariantType.LocalizedText)))
+        await node.write_attribute(ua.AttributeIds.Description, ua.DataValue(ua.Variant(ua.LocalizedText(var.description), ua.VariantType.LocalizedText)))
 
         # Set access level based on permissions - if any role has write, enable write
         access_level = ua.AccessLevel.CurrentRead
@@ -667,8 +703,8 @@ class OpcuaServer:
         struct_obj = await parent_node.add_object(self.namespace_idx, struct.browse_name)
 
         # Set display name and description
-        await struct_obj.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(struct.display_name))))
-        await struct_obj.write_attribute(ua.AttributeIds.Description, ua.DataValue(ua.Variant(ua.LocalizedText(struct.description))))
+        await struct_obj.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(struct.display_name), ua.VariantType.LocalizedText)))
+        await struct_obj.write_attribute(ua.AttributeIds.Description, ua.DataValue(ua.Variant(ua.LocalizedText(struct.description), ua.VariantType.LocalizedText)))
 
         # Create fields
         for field in struct.fields:
@@ -693,7 +729,7 @@ class OpcuaServer:
         )
 
         # Set display name
-        await node.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(field.name))))
+        await node.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(field.name), ua.VariantType.LocalizedText)))
 
         # Set access level based on permissions - if any role has write, enable write
         access_level = ua.AccessLevel.CurrentRead
@@ -732,7 +768,7 @@ class OpcuaServer:
 
         # Create array with initial values
         array_values = [initial_value] * arr.length
-        array_variant = ua.Variant(array_values)
+        array_variant = ua.Variant(array_values, opcua_type)
 
         # Create the variable node
         node = await parent_node.add_variable(
@@ -743,7 +779,7 @@ class OpcuaServer:
         )
 
         # Set display name and description
-        await node.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(arr.display_name))))
+        await node.write_attribute(ua.AttributeIds.DisplayName, ua.DataValue(ua.Variant(ua.LocalizedText(arr.display_name), ua.VariantType.LocalizedText)))
 
         # Set access level based on permissions - if any role has write, enable write
         access_level = ua.AccessLevel.CurrentRead
@@ -947,6 +983,9 @@ class OpcuaServer:
             await self.server.start()
             self.running = True
             log_info(f"OPC-UA server started on {self.config.server.endpoint_url}")
+            
+            # DEBUG: Verify endpoints were created correctly (after server start)
+            # await self._debug_endpoints()
             
             # Print alternative endpoints for client connection
             if hasattr(self, '_client_endpoints'):
