@@ -1,3 +1,4 @@
+#include <inttypes.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -144,18 +145,17 @@ int format_timing_stats_response(char *buffer, size_t buffer_size)
 
     return snprintf(buffer, buffer_size,
                     "STATS:{"
-                    "\"scan_count\":%ld,"
-                    "\"scan_time_min\":%ld,"
-                    "\"scan_time_max\":%ld,"
-                    "\"scan_time_avg\":%ld,"
-                    "\"cycle_time_min\":%ld,"
-                    "\"cycle_time_max\":%ld,"
-                    "\"cycle_time_avg\":%ld,"
-                    "\"cycle_latency_min\":%ld,"
-                    "\"cycle_latency_max\":%ld,"
-                    "\"cycle_latency_avg\":%ld,"
-                    "\"overruns\":%ld"
-                    "}\n",
+                    "\"scan_count\":%" PRId64 ","
+                    "\"scan_time_min\":%" PRId64 ","
+                    "\"scan_time_max\":%" PRId64 ","
+                    "\"scan_time_avg\":%" PRId64 ","
+                    "\"cycle_time_min\":%" PRId64 ","
+                    "\"cycle_time_max\":%" PRId64 ","
+                    "\"cycle_time_avg\":%" PRId64 ","
+                    "\"cycle_latency_min\":%" PRId64 ","
+                    "\"cycle_latency_max\":%" PRId64 ","
+                    "\"cycle_latency_avg\":%" PRId64 ","
+                    "\"overruns\":%" PRId64 "}\n",
                     snapshot.scan_count, snapshot.scan_time_min, snapshot.scan_time_max,
                     snapshot.scan_time_avg, snapshot.cycle_time_min, snapshot.cycle_time_max,
                     snapshot.cycle_time_avg, snapshot.cycle_latency_min, snapshot.cycle_latency_max,
