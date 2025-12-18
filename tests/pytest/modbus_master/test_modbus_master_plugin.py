@@ -1,9 +1,10 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-# Import your plugin
-import modbus_master_plugin as plugin
+import core.src.drivers.plugins.python.modbus_master.modbus_master_plugin as plugin
 
+
+MODULE = "core.src.drivers.plugins.python.modbus_master.modbus_master_plugin"
 
 @pytest.fixture(autouse=True)
 def reset_globals():
@@ -22,9 +23,9 @@ def reset_globals():
 # ---------------------------------------------------------------------
 # INIT TESTS
 # ---------------------------------------------------------------------
-@patch("modbus_master_plugin.safe_extract_runtime_args_from_capsule")
-@patch("modbus_master_plugin.SafeBufferAccess")
-@patch("modbus_master_plugin.ModbusMasterConfig")
+@patch(f"{MODULE}.safe_extract_runtime_args_from_capsule")
+@patch(f"{MODULE}.SafeBufferAccess")
+@patch(f"{MODULE}.ModbusMasterConfig")
 def test_init_success(mock_cfg, mock_buf, mock_extract):
     # --- mock extract ---
     mock_extract.return_value = ({"arg": 123}, None)
@@ -51,7 +52,7 @@ def test_init_success(mock_cfg, mock_buf, mock_extract):
     assert plugin.modbus_master_config == mock_cfg_instance
 
 
-@patch("modbus_master_plugin.safe_extract_runtime_args_from_capsule", return_value=(None, "bad"))
+@patch(f"{MODULE}.safe_extract_runtime_args_from_capsule", return_value=(None, "bad"))
 def test_init_fail_on_capsule(mock_extract):
     ok = plugin.init("capsule")
     assert ok is False
@@ -61,7 +62,7 @@ def test_init_fail_on_capsule(mock_extract):
 # ---------------------------------------------------------------------
 # START LOOP TESTS
 # ---------------------------------------------------------------------
-@patch("modbus_master_plugin.ModbusSlaveDevice")
+@patch(f"{MODULE}.ModbusSlaveDevice")
 def test_start_loop_success(mock_device_class):
     # Prepare mock config with 2 fake devices
     dev1 = MagicMock(name="Device1")
@@ -124,7 +125,7 @@ def test_stop_loop_no_threads():
 # ---------------------------------------------------------------------
 # CLEANUP TESTS
 # ---------------------------------------------------------------------
-@patch("modbus_master_plugin.stop_loop")
+@patch(f"{MODULE}.stop_loop")
 def test_cleanup_success(mock_stop):
     plugin.runtime_args = {"arg": 1}
     plugin.modbus_master_config = MagicMock()

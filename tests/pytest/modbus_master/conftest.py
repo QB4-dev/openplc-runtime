@@ -2,7 +2,11 @@
 import pytest
 from unittest.mock import MagicMock
 from types import SimpleNamespace
-from modbus_master_plugin import ModbusSlaveDevice  # adjust import
+
+from core.src.drivers.plugins.python.modbus_master.modbus_master_plugin import ModbusSlaveDevice  # adjust import
+
+
+MODULE = "core.src.drivers.plugins.python.modbus_master.modbus_master_plugin"
 
 @pytest.fixture
 def fake_device_config():
@@ -36,7 +40,7 @@ def fake_modbus_client(monkeypatch):
     mock_client.connected = True
     mock_client.connect.return_value = True
     mock_client.close.return_value = None
-    monkeypatch.setattr("modbus_master_plugin.ModbusTcpClient", lambda *a, **kw: mock_client)
+    monkeypatch.setattr(f"{MODULE}.ModbusTcpClient", lambda *a, **kw: mock_client)
     return mock_client
 
 @pytest.fixture

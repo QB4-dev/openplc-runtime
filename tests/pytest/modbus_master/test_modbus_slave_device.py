@@ -3,7 +3,7 @@ import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
-from core.src.drivers.plugins.python.modbus_master.conftest import fake_sba
+from conftest import fake_sba
 
 def test_get_sba_access_details_boolean(modbus_slave):
     iec_addr = SimpleNamespace(area="I", size="X", index_bytes=0, bit=3)

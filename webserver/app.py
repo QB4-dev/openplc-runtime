@@ -1,14 +1,17 @@
+import json
 import os
 import shutil
 import ssl
 import threading
 from pathlib import Path
-from typing import Callable, Final
+from typing import Callable, Final, Optional
 
 import flask
 import flask_login
+
 from webserver.credentials import CertGen
 from webserver.debug_websocket import init_debug_websocket
+from webserver.logger import get_logger
 from webserver.plcapp_management import (
     MAX_FILE_SIZE,
     BuildStatus,
@@ -16,6 +19,7 @@ from webserver.plcapp_management import (
     build_state,
     run_compile,
     safe_extract,
+    update_plugin_configurations,
 )
 from webserver.restapi import (
     app_restapi,
@@ -25,7 +29,6 @@ from webserver.restapi import (
     restapi_bp,
 )
 from webserver.runtimemanager import RuntimeManager
-from webserver.logger import get_logger, LogParser
 
 logger, _ = get_logger("logger", use_buffer=True)
 
@@ -79,11 +82,41 @@ def handle_compilation_status(data: dict) -> dict:
     }
 
 
+def parse_timing_stats(stats_response: Optional[str]) -> Optional[dict]:
+    """
+    Parse the STATS response from the runtime.
+    Expected format: STATS:{json_object}
+    Returns the parsed JSON object or None if parsing fails.
+    """
+    if stats_response is None:
+        return None
+
+    # Remove the STATS: prefix
+    if stats_response.startswith("STATS:"):
+        json_str = stats_response[6:].strip()
+    else:
+        return None
+
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        return None
+
+
 def handle_status(data: dict) -> dict:
     response = runtime_manager.status_plc()
     if response is None:
         return {"status": "No response from runtime"}
-    return {"status": response}
+
+    result: dict = {"status": response}
+
+    # Fetch timing stats and include them in the response
+    stats_response = runtime_manager.stats_plc()
+    timing_stats = parse_timing_stats(stats_response)
+    if timing_stats is not None:
+        result["timing_stats"] = timing_stats
+
+    return result
 
 
 def handle_ping(data: dict) -> dict:
@@ -152,6 +185,9 @@ def handle_upload_file(data: dict) -> dict:
             shutil.rmtree(extract_dir)
 
         safe_extract(zip_file, extract_dir, valid_files)
+
+        # Update plugin configurations based on extracted config files
+        update_plugin_configurations(extract_dir)
 
         # Start compilation in a separate thread
         build_state.status = BuildStatus.COMPILING

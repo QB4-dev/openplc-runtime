@@ -5,9 +5,10 @@ import threading
 import time
 
 import psutil
-from webserver.unixserver import UnixLogServer
+
+from webserver.logger import get_logger
 from webserver.unixclient import SyncUnixClient
-from webserver.logger import get_logger, LogParser
+from webserver.unixserver import UnixLogServer
 
 logger, buffer = get_logger("logger", use_buffer=True)
 
@@ -31,17 +32,13 @@ class RuntimeManager:
         for proc in psutil.process_iter(["pid", "exe", "cmdline"]):
             try:
                 # First try to match by executable path (most reliable)
-                if proc.info["exe"] and os.path.samefile(
-                    proc.info["exe"], self.runtime_path
-                ):
+                if proc.info["exe"] and os.path.samefile(proc.info["exe"], self.runtime_path):
                     return proc
 
                 # Alternatively, match by command line (fallback)
                 cmdline = proc.info.get("cmdline")
                 if cmdline and isinstance(cmdline, (list, tuple)) and len(cmdline) > 0:
-                    cmdline_str = " ".join(
-                        str(arg) for arg in cmdline if arg is not None
-                    )
+                    cmdline_str = " ".join(str(arg) for arg in cmdline if arg is not None)
                     if self.runtime_path in cmdline_str:
                         return proc
 
@@ -110,9 +107,7 @@ class RuntimeManager:
         # Start runtime process if not already running
         running_process = self.find_running_process()
         if running_process:
-            logger.info(
-                "Found existing PLC runtime process with PID %d", running_process.pid
-            )
+            logger.info("Found existing PLC runtime process with PID %d", running_process.pid)
             self.process = running_process
             self._safe_start_log_server()
             self._safe_connect_runtime_socket()
@@ -139,10 +134,7 @@ class RuntimeManager:
         if self.process is None:
             return False
         if isinstance(self.process, psutil.Process):
-            if (
-                self.process.is_running()
-                and self.process.status() != psutil.STATUS_ZOMBIE
-            ):
+            if self.process.is_running() and self.process.status() != psutil.STATUS_ZOMBIE:
                 return True
         elif isinstance(self.process, subprocess.Popen):
             if self.process.poll() is None:
@@ -255,6 +247,7 @@ class RuntimeManager:
             return "STOP:ERROR\n"
         except Exception as e:
             logger.error("Failed to stop PLC runtime (unexpected): %s", e)
+            return "STOP:ERROR\n"
 
     def status_plc(self):
         """
@@ -268,3 +261,16 @@ class RuntimeManager:
         except Exception as e:
             logger.error("Failed to get PLC status (unexpected): %s", e)
             return "STATUS:ERROR\n"
+
+    def stats_plc(self):
+        """
+        Send STATS command to get timing statistics
+        """
+        try:
+            return self.runtime_socket.send_and_receive("STATS\n")
+        except (OSError, socket.error) as e:
+            logger.error("Failed to get PLC stats: %s", e)
+            return None
+        except Exception as e:
+            logger.error("Failed to get PLC stats (unexpected): %s", e)
+            return None

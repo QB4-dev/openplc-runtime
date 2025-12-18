@@ -21,48 +21,13 @@
 
 extern PLCState plc_state;
 volatile sig_atomic_t keep_running = 1;
-extern plc_timing_stats_t plc_timing_stats;
-plugin_driver_t *plugin_driver = NULL;
+plugin_driver_t *plugin_driver     = NULL;
 extern bool print_logs;
 
 void handle_sigint(int sig)
 {
     (void)sig;
     keep_running = 0;
-}
-
-void *print_stats_thread(void *arg)
-{
-    (void)arg;
-    while (keep_running)
-    {
-        /*
-        if (bool_output[0][0])
-        {
-            log_debug("bool_output[0][0]: %d", *bool_output[0][0]);
-        }
-        else
-        {
-            log_debug("bool_output[0][0] is NULL");
-        }
-        */
-
-        log_info("Scan Count: %lu", plc_timing_stats.scan_count);
-        log_info("Scan Time - Min: %ld us, Max: %ld us, Avg: %ld us",
-                 plc_timing_stats.scan_time_min, plc_timing_stats.scan_time_max,
-                 plc_timing_stats.scan_time_avg);
-        log_info("Cycle Time - Min: %lu us, Max: %lu us, Avg: %ld us",
-                 plc_timing_stats.cycle_time_min, plc_timing_stats.cycle_time_max,
-                 plc_timing_stats.cycle_time_avg);
-        log_info("Cycle Latency - Min: %ld us, Max: %ld us, Avg: %ld us",
-                 plc_timing_stats.cycle_latency_min, plc_timing_stats.cycle_latency_max,
-                 plc_timing_stats.cycle_latency_avg);
-        log_info("Overruns: %lu", plc_timing_stats.overruns);
-
-        // Print every 5 seconds
-        sleep(5);
-    }
-    return NULL;
 }
 
 int main(int argc, char *argv[])
@@ -110,14 +75,6 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    // Launch status printing thread
-    pthread_t stats_thread;
-    if (pthread_create(&stats_thread, NULL, print_stats_thread, NULL) != 0)
-    {
-        log_error("Failed to create stats thread");
-        return -1;
-    }
-
     // Start PLC
     if (plc_set_state(PLC_STATE_RUNNING) != true)
     {
@@ -158,6 +115,5 @@ int main(int argc, char *argv[])
     // Cleanup
     log_info("Shutting down...");
     plc_state_manager_cleanup();
-    pthread_join(stats_thread, NULL);
     return 0;
 }

@@ -1,7 +1,6 @@
 import os
 from typing import Callable, Optional
 
-import webserver.config
 from flask import Blueprint, Flask, jsonify, request
 from flask_jwt_extended import (
     JWTManager,
@@ -12,7 +11,9 @@ from flask_jwt_extended import (
 )
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
-from webserver.logger import get_logger, LogParser
+
+import webserver.config
+from webserver.logger import get_logger
 
 logger, buffer = get_logger("logger", use_buffer=True)
 
@@ -28,6 +29,15 @@ else:
 restapi_bp = Blueprint("restapi_blueprint", __name__)
 _handler_callback_get: Optional[Callable[[str, dict], dict]] = None
 _handler_callback_post: Optional[Callable[[str, dict], dict]] = None
+
+
+@restapi_bp.after_request
+def add_runtime_version_header(response):
+    """Add runtime version header to all API responses for version detection."""
+    response.headers["X-OpenPLC-Runtime-Version"] = "v4"
+    return response
+
+
 jwt = JWTManager(app_restapi)
 db = SQLAlchemy(app_restapi)
 
@@ -45,6 +55,7 @@ def check_if_token_revoked(jwt_header, jwt_payload):
         logger.error("Error revoking JWT: %s", e)
     return False
 
+
 class User(db.Model):  # type: ignore[name-defined]
     __tablename__ = "users"
 
@@ -58,9 +69,7 @@ class User(db.Model):  # type: ignore[name-defined]
 
     def set_password(self, password: str) -> str:
         password = password + app_restapi.config["PEPPER"]
-        self.password_hash = generate_password_hash(
-            password, method=self.derivation_method
-        )
+        self.password_hash = generate_password_hash(password, method=self.derivation_method)
         return self.password_hash
 
     def check_password(self, password: str) -> bool:
@@ -154,7 +163,7 @@ def get_users_info():
         # )
         try:
             users_exist = User.query.first() is not None
-        except Exception as e:
+        except Exception:
             # logger.error("Error checking for users: %s", e)
             return jsonify({"msg": "User retrieval error"}), 500
 

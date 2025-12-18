@@ -3,6 +3,7 @@
 
 #include <dlfcn.h>
 #include <sched.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <stdint.h>
 
@@ -41,6 +42,14 @@ void timespec_diff(struct timespec *a, struct timespec *b,
  * @brief Set the realtime priority object
  */
 void set_realtime_priority(void);
+
+/**
+ * @brief Lock all current and future memory pages to prevent page faults
+ * 
+ * This prevents the kernel from swapping out memory pages during PLC execution,
+ * which could cause unpredictable latency spikes in the scan cycle.
+ */
+void lock_memory(void);
 
 /**
  * @brief Parse a hex string into a byte array

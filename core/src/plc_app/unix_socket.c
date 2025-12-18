@@ -11,6 +11,7 @@
 
 #include "debug_handler.h"
 #include "plc_state_manager.h"
+#include "scan_cycle_manager.h"
 #include "unix_socket.h"
 #include "utils/log.h"
 #include "utils/utils.h"
@@ -93,6 +94,11 @@ void handle_unix_socket_commands(const char *command, char *response, size_t res
             strncpy(response, "START:ERROR_ALREADY_RUNNING\n", response_size);
             log_error("Received START command but PLC is already RUNNING");
         }
+    }
+    else if (strcmp(command, "STATS") == 0)
+    {
+        log_debug("Received STATS command");
+        format_timing_stats_response(response, response_size);
     }
     else if (strncmp(command, "DEBUG:", 6) == 0)
     {

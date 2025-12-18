@@ -2,14 +2,15 @@
 #include <Python.h>
 
 #include "../plc_app/image_tables.h"
+#include "../plc_app/utils/log.h"
 #include "plugin_config.h"
 #include "plugin_driver.h"
 #include "plugin_utils.h"
+#include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <dlfcn.h>
 
 // External buffer declarations from image_tables.c
 extern IEC_BOOL *bool_input[BUFFER_SIZE][8];
@@ -41,12 +42,32 @@ plugin_driver_t *plugin_driver_create(void)
         return NULL;
     }
 
-    // Initialize mutex
-    if (pthread_mutex_init(&driver->buffer_mutex, NULL) != 0)
+    // Initialize mutex with priority inheritance to prevent priority inversion
+    // This ensures that when a lower-priority plugin thread holds the mutex,
+    // it temporarily inherits the priority of any higher-priority thread
+    // (like the PLC scan cycle thread) waiting for the mutex.
+    pthread_mutexattr_t mutex_attr;
+    if (pthread_mutexattr_init(&mutex_attr) != 0)
     {
         free(driver);
         return NULL;
     }
+
+    if (pthread_mutexattr_setprotocol(&mutex_attr, PTHREAD_PRIO_INHERIT) != 0)
+    {
+        pthread_mutexattr_destroy(&mutex_attr);
+        free(driver);
+        return NULL;
+    }
+
+    if (pthread_mutex_init(&driver->buffer_mutex, &mutex_attr) != 0)
+    {
+        pthread_mutexattr_destroy(&mutex_attr);
+        free(driver);
+        return NULL;
+    }
+
+    pthread_mutexattr_destroy(&mutex_attr);
 
     return driver;
 }
@@ -102,6 +123,45 @@ int plugin_driver_load_config(plugin_driver_t *driver, const char *config_file)
         return -1;
     }
 
+    // Check if config file exists, if not copy from default
+    if (access(config_file, F_OK) != 0)
+    {
+        printf("[PLUGIN]: Config file %s not found, copying from plugins_default.conf\n",
+               config_file);
+
+        // Check if default config exists
+        if (access("plugins_default.conf", F_OK) != 0)
+        {
+            printf("[PLUGIN]: Default config file plugins_default.conf not found\n");
+            return -1;
+        }
+
+        // Copy default config to target config file
+        FILE *src = fopen("plugins_default.conf", "r");
+        FILE *dst = fopen(config_file, "w");
+
+        if (!src || !dst)
+        {
+            printf("[PLUGIN]: Failed to copy default config\n");
+            if (src)
+                fclose(src);
+            if (dst)
+                fclose(dst);
+            return -1;
+        }
+
+        char buffer[1024];
+        size_t bytes;
+        while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0)
+        {
+            fwrite(buffer, 1, bytes, dst);
+        }
+
+        fclose(src);
+        fclose(dst);
+        printf("[PLUGIN]: Successfully copied default config to %s\n", config_file);
+    }
+
     plugin_config_t configs[MAX_PLUGINS];
     int config_count = parse_plugin_config(config_file, configs, MAX_PLUGINS);
     if (config_count < 0)
@@ -110,11 +170,12 @@ int plugin_driver_load_config(plugin_driver_t *driver, const char *config_file)
     }
 
     driver->plugin_count = config_count;
-    has_python_plugin = 0;
+    has_python_plugin    = 0;
     for (int w = 0; w < config_count; w++)
     {
         memcpy(&driver->plugins[w].config, &configs[w], sizeof(plugin_config_t));
-        if (configs[w].type == PLUGIN_TYPE_PYTHON) {
+        if (configs[w].type == PLUGIN_TYPE_PYTHON)
+        {
             has_python_plugin = 1;
         }
     }
@@ -134,7 +195,9 @@ int plugin_driver_load_config(plugin_driver_t *driver, const char *config_file)
                 plugin_manager_destroy(plugin->manager);
                 return -1;
             }
-        } else if (plugin->config.type == PLUGIN_TYPE_NATIVE) {
+        }
+        else if (plugin->config.type == PLUGIN_TYPE_NATIVE)
+        {
             if (native_plugin_get_symbols(plugin) != 0)
             {
                 fprintf(stderr, "Failed to get native plugin symbols for: %s\n",
@@ -159,6 +222,14 @@ int plugin_driver_init(plugin_driver_t *driver)
     for (int i = 0; i < driver->plugin_count; i++)
     {
         plugin_instance_t *plugin = &driver->plugins[i];
+
+        // Skip disabled plugins
+        if (!plugin->config.enabled)
+        {
+            printf("[PLUGIN]: Skipping disabled plugin: %s\n", plugin->config.name);
+            continue;
+        }
+
         if (plugin->config.type == PLUGIN_TYPE_PYTHON && plugin->python_plugin &&
             plugin->python_plugin->pFuncInit)
         {
@@ -174,7 +245,7 @@ int plugin_driver_init(plugin_driver_t *driver)
             // Call the Python init function with proper capsule
             PyObject *result =
                 PyObject_CallFunctionObjArgs(plugin->python_plugin->pFuncInit, args, NULL);
-            
+
             // Store the capsule reference for the lifetime of the plugin
             plugin->python_plugin->args_capsule = args;
 
@@ -192,7 +263,8 @@ int plugin_driver_init(plugin_driver_t *driver)
         {
             // Generate structured args for native plugin
             plugin_runtime_args_t *args =
-                (plugin_runtime_args_t *)generate_structured_args_with_driver(PLUGIN_TYPE_NATIVE, driver, i);
+                (plugin_runtime_args_t *)generate_structured_args_with_driver(PLUGIN_TYPE_NATIVE,
+                                                                              driver, i);
             if (!args)
             {
                 fprintf(stderr, "Failed to generate runtime args for native plugin: %s\n",
@@ -232,8 +304,8 @@ int plugin_driver_start(plugin_driver_t *driver)
         return 0;
     }
 
-
-    if (has_python_plugin) {
+    if (has_python_plugin)
+    {
         main_tstate = PyEval_SaveThread();
         gstate      = PyGILState_Ensure();
     }
@@ -241,6 +313,14 @@ int plugin_driver_start(plugin_driver_t *driver)
     for (int i = 0; i < driver->plugin_count; i++)
     {
         plugin_instance_t *plugin = &driver->plugins[i];
+
+        // Skip disabled plugins
+        if (!plugin->config.enabled)
+        {
+            printf("[PLUGIN]: Skipping disabled plugin during start: %s\n", plugin->config.name);
+            continue;
+        }
+
         switch (plugin->config.type)
         {
         case PLUGIN_TYPE_PYTHON:
@@ -295,7 +375,8 @@ int plugin_driver_start(plugin_driver_t *driver)
             break;
         }
     }
-    if (has_python_plugin) {
+    if (has_python_plugin)
+    {
         PyGILState_Release(gstate);
     }
     return 0;
@@ -356,6 +437,60 @@ int plugin_driver_stop(plugin_driver_t *driver)
     return 0;
 }
 
+int plugin_driver_restart(plugin_driver_t *driver)
+{
+    if (!driver)
+    {
+        return -1;
+    }
+
+    printf("[PLUGIN]: Restarting all plugins...\n");
+
+    // Stop all running plugins first
+    if (plugin_driver_stop(driver) != 0)
+    {
+        fprintf(stderr, "[PLUGIN]: Failed to stop plugins during restart\n");
+        return -1;
+    }
+
+    // Clean up plugins without destroying the driver
+    gstate = PyGILState_Ensure();
+    for (int i = 0; i < driver->plugin_count; i++)
+    {
+        plugin_instance_t *plugin = &driver->plugins[i];
+        if (plugin->python_plugin)
+        {
+            python_plugin_cleanup(plugin);
+        }
+    }
+    PyGILState_Release(gstate);
+
+    // CRITICAL: Reload configuration from plugins.conf file
+    printf("[PLUGIN]: Reloading plugin configuration...\n");
+    if (plugin_driver_load_config(driver, "plugins.conf") != 0)
+    {
+        fprintf(stderr, "[PLUGIN]: Failed to reload plugin configuration during restart\n");
+        return -1;
+    }
+
+    // Reinitialize all plugins (only enabled ones)
+    if (plugin_driver_init(driver) != 0)
+    {
+        fprintf(stderr, "[PLUGIN]: Failed to reinitialize plugins during restart\n");
+        return -1;
+    }
+
+    // Restart all plugins (only enabled ones)
+    if (plugin_driver_start(driver) != 0)
+    {
+        fprintf(stderr, "[PLUGIN]: Failed to start plugins during restart\n");
+        return -1;
+    }
+
+    printf("[PLUGIN]: All plugins restarted successfully\n");
+    return 0;
+}
+
 void plugin_driver_destroy(plugin_driver_t *driver)
 {
     if (!driver)
@@ -369,7 +504,8 @@ void plugin_driver_destroy(plugin_driver_t *driver)
         return;
     }
 
-    if (has_python_plugin) {
+    if (has_python_plugin)
+    {
         gstate = PyGILState_Ensure();
     }
 
@@ -393,10 +529,12 @@ void plugin_driver_destroy(plugin_driver_t *driver)
             if (plugin->native_plugin->cleanup)
             {
                 plugin->native_plugin->cleanup();
-                printf("[PLUGIN]: Native plugin %s cleaned up successfully.\n", plugin->config.name);
+                printf("[PLUGIN]: Native plugin %s cleaned up successfully.\n",
+                       plugin->config.name);
             }
             // Close the shared library handle
-            if (plugin->native_plugin->handle) {
+            if (plugin->native_plugin->handle)
+            {
                 dlclose(plugin->native_plugin->handle);
                 plugin->native_plugin->handle = NULL;
             }
@@ -406,7 +544,8 @@ void plugin_driver_destroy(plugin_driver_t *driver)
         }
     }
 
-    if (has_python_plugin) {
+    if (has_python_plugin)
+    {
         PyGILState_Release(gstate);
         PyEval_RestoreThread(main_tstate);
         Py_FinalizeEx();
@@ -487,6 +626,12 @@ void *generate_structured_args_with_driver(plugin_type_t type, plugin_driver_t *
     // Initialize buffer size info
     args->buffer_size     = BUFFER_SIZE;
     args->bits_per_buffer = 8;
+
+    // Initialize logging functions
+    args->log_info  = log_info;
+    args->log_debug = log_debug;
+    args->log_warn  = log_warn;
+    args->log_error = log_error;
 
     // printf("[PLUGIN]: Runtime args initialized:\n");
     // printf("[PLUGIN]:   buffer_size = %d\n", args->buffer_size);
@@ -751,28 +896,32 @@ int native_plugin_get_symbols(plugin_instance_t *plugin)
     native_bundle->start = (plugin_start_loop_func_t)dlsym(handle, "start_loop");
     if (!native_bundle->start)
     {
-        fprintf(stderr, "Warning: 'start_loop' function not found in native plugin '%s' (optional)\n",
+        fprintf(stderr,
+                "Warning: 'start_loop' function not found in native plugin '%s' (optional)\n",
                 plugin->config.path);
     }
 
     native_bundle->stop = (plugin_stop_loop_func_t)dlsym(handle, "stop_loop");
     if (!native_bundle->stop)
     {
-        fprintf(stderr, "Warning: 'stop_loop' function not found in native plugin '%s' (optional)\n",
+        fprintf(stderr,
+                "Warning: 'stop_loop' function not found in native plugin '%s' (optional)\n",
                 plugin->config.path);
     }
 
     native_bundle->cycle_start = (plugin_cycle_start_func_t)dlsym(handle, "cycle_start");
     if (!native_bundle->cycle_start)
     {
-        fprintf(stderr, "Warning: 'cycle_start' function not found in native plugin '%s' (optional)\n",
+        fprintf(stderr,
+                "Warning: 'cycle_start' function not found in native plugin '%s' (optional)\n",
                 plugin->config.path);
     }
 
     native_bundle->cycle_end = (plugin_cycle_end_func_t)dlsym(handle, "cycle_end");
     if (!native_bundle->cycle_end)
     {
-        fprintf(stderr, "Warning: 'cycle_end' function not found in native plugin '%s' (optional)\n",
+        fprintf(stderr,
+                "Warning: 'cycle_end' function not found in native plugin '%s' (optional)\n",
                 plugin->config.path);
     }
 

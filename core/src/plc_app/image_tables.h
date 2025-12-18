@@ -82,4 +82,31 @@ extern void (*ext_set_trace)(size_t idx, bool forced, void *val);
  */
 int symbols_init(PluginManager *pm);
 
+/**
+ * @brief Fill NULL pointers in image tables with temporary backing buffers
+ *
+ * This function iterates through all image table arrays and points any NULL
+ * entries to temporary backing storage. This ensures that plugins accessing
+ * addresses not used by the PLC program won't fail due to NULL pointer access.
+ *
+ * Must be called after ext_glueVars() has mapped the user program's located
+ * variables to the image tables.
+ *
+ * @note This function should be called with buffer_mutex held for thread safety.
+ */
+void image_tables_fill_null_pointers(void);
+
+/**
+ * @brief Clear all pointers from image tables
+ *
+ * This function resets all pointers in the image tables back to NULL.
+ * All pointers will be remapped when a new program is loaded via glueVars().
+ *
+ * Must be called before unloading a PLC program to ensure clean state for
+ * the next program load.
+ *
+ * @note This function should be called with buffer_mutex held for thread safety.
+ */
+void image_tables_clear_null_pointers(void);
+
 #endif // IMAGE_TABLES_H

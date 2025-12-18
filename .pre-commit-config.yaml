@@ -5,7 +5,7 @@ repos:
       - id: pylint
         # args: [--fail-on=F,E]
         args: [
-            "--disable=C0114,C0411,C0115,C0116,C0412,E0401,W0718,R1702,R0911,R0912,R0915,R1705,W0404,W0603,W0613,W0511",
+            "--disable=C0114,C0411,C0115,C0116,C0412,E0401,W0718,R1702,R0911,R0912,R0915,R1705,W0404,W0603,W0613,W0511,R0902,R1732",
           ] # example: disable missing-docstring
         additional_dependencies:
           [flask, flask-sqlalchemy, flask_jwt_extended, werkzeug]
