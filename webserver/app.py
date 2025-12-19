@@ -110,11 +110,15 @@ def handle_status(data: dict) -> dict:
 
     result: dict = {"status": response}
 
-    # Fetch timing stats and include them in the response
-    stats_response = runtime_manager.stats_plc()
-    timing_stats = parse_timing_stats(stats_response)
-    if timing_stats is not None:
-        result["timing_stats"] = timing_stats
+    # Only fetch timing stats if explicitly requested via include_stats parameter.
+    # This avoids acquiring the stats mutex on every status poll, which could
+    # introduce latency to the critical PLC scan cycle.
+    include_stats = data.get("include_stats", "").lower() == "true"
+    if include_stats:
+        stats_response = runtime_manager.stats_plc()
+        timing_stats = parse_timing_stats(stats_response)
+        if timing_stats is not None:
+            result["timing_stats"] = timing_stats
 
     return result
 
