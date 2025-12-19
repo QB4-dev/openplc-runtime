@@ -1,5 +1,6 @@
 """OPC-UA plugin utility functions."""
 
+import ctypes
 import struct
 from typing import Any
 from asyncua import ua
@@ -48,13 +49,18 @@ def convert_value_for_opcua(datatype: str, value: Any) -> Any:
                 return bool(value)
         
         elif datatype.upper() in ["BYTE", "Byte"]:
-            return max(0, min(255, int(value)))  # Clamp to byte range
+            # Ensure proper uint8 type for OPC-UA compatibility
+            return ctypes.c_uint8(max(0, min(255, int(value)))).value
         
         elif datatype.upper() in ["INT", "Int"]:
-            return max(-32768, min(32767, int(value)))  # Clamp to int16 range
+            # Ensure proper int16 type - critical for OPC-UA compatibility
+            clamped_value = max(-32768, min(32767, int(value)))
+            return ctypes.c_int16(clamped_value).value
         
         elif datatype.upper() in ["DINT", "Dint", "INT32", "Int32"]:
-            return max(-2147483648, min(2147483647, int(value)))  # Clamp to int32 range
+            # Ensure proper int32 type for OPC-UA compatibility
+            clamped_value = max(-2147483648, min(2147483647, int(value)))
+            return ctypes.c_int32(clamped_value).value
         
         elif datatype.upper() in ["LINT", "Lint"]:
             return int(value)  # int64
@@ -104,13 +110,18 @@ def convert_value_for_plc(datatype: str, value: Any) -> Any:
                 return int(bool(value))
         
         elif datatype.upper() in ["BYTE", "Byte"]:
-            return max(0, min(255, int(value)))  # Clamp to byte range
+            # Ensure proper uint8 type for PLC compatibility
+            return ctypes.c_uint8(max(0, min(255, int(value)))).value
         
         elif datatype.upper() in ["INT", "Int"]:
-            return max(-32768, min(32767, int(value)))  # Clamp to int16 range
+            # Ensure proper int16 type for PLC compatibility  
+            clamped_value = max(-32768, min(32767, int(value)))
+            return ctypes.c_int16(clamped_value).value
         
         elif datatype.upper() in ["DINT", "Dint", "INT32", "Int32"]:
-            return max(-2147483648, min(2147483647, int(value)))  # Clamp to int32 range
+            # Ensure proper int32 type for PLC compatibility
+            clamped_value = max(-2147483648, min(2147483647, int(value)))
+            return ctypes.c_int32(clamped_value).value
         
         elif datatype.upper() in ["LINT", "Lint"]:
             return int(value)  # int64
