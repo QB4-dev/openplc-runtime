@@ -101,6 +101,7 @@ typedef struct
 // Driver management functions
 plugin_driver_t *plugin_driver_create(void);
 int plugin_driver_load_config(plugin_driver_t *driver, const char *config_file);
+int plugin_driver_update_config(plugin_driver_t *driver, const char *config_file);
 int plugin_driver_init(plugin_driver_t *driver);
 int plugin_driver_start(plugin_driver_t *driver);
 int plugin_driver_stop(plugin_driver_t *driver);

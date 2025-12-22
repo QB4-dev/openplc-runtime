@@ -97,6 +97,24 @@ int load_plc_program(PluginManager *pm)
         pthread_mutex_unlock(&state_mutex);
         log_info("PLC State: INIT");
 
+        // Restart all plugins after successful thread creation
+        if (plugin_driver)
+        {
+            log_info("[PLUGIN]: Plugin driver system created");
+            // Load plugin configuration
+            if (plugin_driver_update_config(plugin_driver, "./plugins.conf") == 0)
+            {
+                // Start plugins
+                plugin_driver_init(plugin_driver);
+                plugin_driver_start(plugin_driver);
+                log_info("[PLUGIN]: Plugin driver system initialized");
+            }
+            else
+            {
+                log_error("[PLUGIN]: Failed to load plugin configuration");
+            }
+        }
+
         if (pthread_create(&plc_thread, NULL, plc_cycle_thread, pm) != 0)
         {
             log_error("Failed to create PLC cycle thread");
@@ -108,18 +126,7 @@ int load_plc_program(PluginManager *pm)
 
             return -1;
         }
-
-        // Restart all plugins after successful thread creation
-        if (plugin_driver && plugin_driver_restart(plugin_driver) != 0)
-        {
-            log_error("Failed to restart plugins after PLC thread creation");
-            // Note: We don't return error here as PLC is already running
-            // This is a warning condition, not a fatal error
-        }
-        else
-        {
-            log_info("Plugins restarted successfully after PLC thread creation");
-        }
+  
 
         return 0;
     }
@@ -151,6 +158,7 @@ int unload_plc_program(PluginManager *pm)
         // Clear temporary pointers from image tables before unloading
         // This ensures clean state for the next program load
         plugin_mutex_take(&plugin_driver->buffer_mutex);
+        plugin_driver_stop(plugin_driver);
         image_tables_clear_null_pointers();
         plugin_mutex_give(&plugin_driver->buffer_mutex);
 

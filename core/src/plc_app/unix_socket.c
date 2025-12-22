@@ -45,12 +45,10 @@ void handle_unix_socket_commands(const char *command, char *response, size_t res
 {
     if (strcmp(command, "PING") == 0)
     {
-        log_debug("Received PING command");
         strncpy(response, "PING:OK\n", response_size);
     }
     else if (strcmp(command, "STATUS") == 0)
     {
-        log_debug("Received STATUS command");
         PLCState current_state = plc_get_state();
 
         if (current_state == PLC_STATE_INIT)
@@ -68,7 +66,6 @@ void handle_unix_socket_commands(const char *command, char *response, size_t res
     }
     else if (strcmp(command, "STOP") == 0)
     {
-        log_debug("Received STOP command");
         if (plc_set_state(PLC_STATE_STOPPED))
             strncpy(response, "STOP:OK\n", response_size);
         else
@@ -76,7 +73,6 @@ void handle_unix_socket_commands(const char *command, char *response, size_t res
     }
     else if (strcmp(command, "START") == 0)
     {
-        log_debug("Received START command");
         PLCState current_state = plc_get_state();
         if (current_state != PLC_STATE_RUNNING)
         {
@@ -97,12 +93,10 @@ void handle_unix_socket_commands(const char *command, char *response, size_t res
     }
     else if (strcmp(command, "STATS") == 0)
     {
-        log_debug("Received STATS command");
         format_timing_stats_response(response, response_size);
     }
     else if (strncmp(command, "DEBUG:", 6) == 0)
     {
-        log_debug("Received DEBUG command");
         uint8_t debug_data[4096] = {0};
         size_t data_length       = parse_hex_string(&command[6], debug_data);
         if (data_length > 0)
@@ -181,8 +175,6 @@ void *unix_socket_thread(void *arg)
             ssize_t bytes_read = read_line(client_fd, command_buffer, COMMAND_BUFFER_SIZE);
             if (bytes_read > 0)
             {
-                log_debug("Received command: %s", command_buffer);
-
                 // Handle the command
                 char response[MAX_RESPONSE_SIZE] = {0};
                 handle_unix_socket_commands(command_buffer, response, MAX_RESPONSE_SIZE);
