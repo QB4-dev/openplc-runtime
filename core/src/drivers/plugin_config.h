@@ -9,7 +9,7 @@ typedef struct
     char name[MAX_PLUGIN_NAME_LEN];
     char path[MAX_PLUGIN_PATH_LEN];
     int enabled;
-    int type; // 0 = native, 1 = python
+    int type; // 0 = python, 1 = native
     char plugin_related_config_path[MAX_PLUGIN_PATH_LEN];
     char venv_path[MAX_PLUGIN_PATH_LEN]; // Path to virtual environment
 } plugin_config_t;

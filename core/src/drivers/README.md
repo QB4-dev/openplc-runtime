@@ -1,6 +1,6 @@
 # OpenPLC Runtime Plugin System
 
-This directory contains the OpenPLC Runtime plugin system, which allows extending the runtime with custom drivers and communication protocols. **Currently, the system actively supports Python plugins. Support for native C plugins is planned for a future release.**
+This directory contains the OpenPLC Runtime plugin system, which allows extending the runtime with custom drivers and communication protocols. The system supports both Python plugins and native C/C++ plugins (compiled shared libraries).
 
 ## Overview
 
@@ -8,7 +8,7 @@ The plugin system provides a flexible architecture for integrating external hard
 
 **Current Status:**
 *   **Supported:** Python plugins (`.py` files) are fully supported and operational.
-*   **Planned:** Native C plugins (`.so` files) are part of the design and API but are not yet implemented or functional. All references to native C plugins in this document describe the intended future functionality.
+*   **Supported:** Native C/C++ plugins (`.so` files) are fully supported and operational.
 
 ## Architecture
 
@@ -18,28 +18,33 @@ The plugin system provides a flexible architecture for integrating external hard
 core/src/drivers/
 ├── plugin_driver.c/h          # Main plugin driver system
 ├── plugin_config.c/h          # Configuration file parsing
-├── python_plugin_bridge.c/h   # Python plugin integration
+├── python_plugin_bridge.h     # Python plugin integration
 ├── CMakeLists.txt             # Build configuration
-├── plugins/python/            # Python plugin implementations
-│   ├── examples/              # Python plugin examples
-│   ├── modbus_slave/          # Modbus TCP slave Python plugin
-│   └── shared/                # Shared Python modules (e.g., type definitions)
-└── *.py                      # Standalone Python plugin files (if any)
+├── plugins/
+│   ├── python/                # Python plugin implementations
+│   │   ├── examples/          # Python plugin examples
+│   │   ├── modbus_master/     # Modbus TCP master Python plugin
+│   │   ├── modbus_slave/      # Modbus TCP slave Python plugin
+│   │   └── shared/            # Shared Python modules (e.g., type definitions)
+│   └── native/                # Native C/C++ plugin implementations
+│       └── examples/          # Native plugin examples and templates
+└── README.md                  # This documentation
 ```
 
 ### Plugin Types
 
-1.  **Python Plugins** (`PLUGIN_TYPE_PYTHON = 0`) - **Currently Supported**
+1.  **Python Plugins** (`PLUGIN_TYPE_PYTHON = 0`) - **Supported**
     *   Python scripts (`.py` files).
     *   Embedded Python interpreter.
     *   Easier development and debugging.
-    *   Enhanced type safety and buffer access with `python_plugin_types.py`.
+    *   Enhanced type safety and buffer access with the `shared` module.
+    *   Support for isolated virtual environments per plugin.
 
-2.  **Native C Plugins** (`PLUGIN_TYPE_NATIVE = 1`) - **Future Support**
+2.  **Native C/C++ Plugins** (`PLUGIN_TYPE_NATIVE = 1`) - **Supported**
     *   Compiled shared libraries (`.so` files).
-    *   Direct C function calls.
-    *   Maximum performance (intended).
-    *   *Note: This plugin type is defined in the API but not yet implemented.*
+    *   Direct C function calls via `dlopen`/`dlsym`.
+    *   Maximum performance for time-critical operations.
+    *   No Python interpreter overhead.
 
 ## Plugin Interface
 
@@ -73,20 +78,40 @@ def cleanup():
     pass
 ```
 
-#### Native C Plugins (Future Support - API Defined)
+#### Native C/C++ Plugins (Supported)
 ```c
 // Mandatory initialization function
-int init(plugin_runtime_args_t *args);
+// args: pointer to plugin_runtime_args_t structure
+// IMPORTANT: The args pointer is freed after init() returns.
+// You must copy any data you need to retain during init().
+int init(void *args);
 
 // Optional lifecycle functions
-void start_loop(void);
-void stop_loop(void);
-void run_cycle(void);
+void start_loop(void);  // Called when plugin should start operations
+void stop_loop(void);   // Called when plugin should stop operations
+void cleanup(void);     // Called when plugin is being unloaded
 
-// Mandatory cleanup function
-void cleanup(void);
+// Reserved hooks (symbols loaded but not currently invoked by the runtime)
+void cycle_start(void); // Reserved for future per-cycle start hook
+void cycle_end(void);   // Reserved for future per-cycle end hook
 ```
-*Note: The C API is defined but the loading and execution mechanism for native plugins is not yet implemented.*
+
+**Important: Native Plugin Args Lifetime**
+
+The `plugin_runtime_args_t*` pointer passed to `init()` is freed immediately after the function returns. Native plugins must copy the structure contents (or the specific fields they need) into plugin-owned storage during `init()`. Do not store the pointer itself for later use, as this will result in a use-after-free bug.
+
+```c
+// Example: Properly storing runtime args in a native plugin
+static plugin_runtime_args_t g_args;  // Plugin-owned copy
+
+int init(void *args) {
+    if (!args) return -1;
+    // Copy the entire structure
+    memcpy(&g_args, args, sizeof(plugin_runtime_args_t));
+    // Now g_args can be safely used in start_loop, stop_loop, etc.
+    return 0;
+}
+```
 
 ### Runtime Arguments Structure
 
@@ -108,12 +133,12 @@ typedef struct {
     IEC_UINT **int_memory;          // Internal memory (16-bit)
     IEC_UDINT **dint_memory;        // Internal memory (32-bit)
     IEC_ULINT **lint_memory;        // Internal memory (64-bit)
-    
+
     // Thread synchronization
     int (*mutex_take)(pthread_mutex_t *mutex);
     int (*mutex_give)(pthread_mutex_t *mutex);
     pthread_mutex_t *buffer_mutex;
-    
+
     // Buffer metadata
     int buffer_size;                // Number of buffers
     int bits_per_buffer;           // Bits per boolean buffer (typically 8)
@@ -124,10 +149,10 @@ typedef struct {
 
 ### Enhanced Python SafeBufferAccess (Recommended)
 
-The `plugins/python/shared/python_plugin_types.py` module provides a `SafeBufferAccess` wrapper class for robust and safe buffer operations. This is the recommended way to interact with OpenPLC buffers.
+The `plugins/python/shared/` module provides a `SafeBufferAccess` wrapper class for robust and safe buffer operations. This is the recommended way to interact with OpenPLC buffers.
 
 ```python
-from plugins.python.shared.python_plugin_types import SafeBufferAccess, safe_extract_runtime_args_from_capsule
+from shared import SafeBufferAccess, safe_extract_runtime_args_from_capsule
 
 def init(runtime_args_capsule):
     # Safely extract runtime arguments from the PyCapsule
@@ -141,7 +166,7 @@ def init(runtime_args_capsule):
     if not safe_buffer.is_valid:
         print(f"Failed to create SafeBufferAccess: {safe_buffer.error_msg}")
         return False
-        
+
     global safe_access
     safe_access = safe_buffer
     return True
@@ -193,21 +218,22 @@ def manual_safe_write_output(runtime_args, buffer_idx, bit_pos, value):
 Plugins are configured via a text file, typically `plugins.conf`, located in the project root. Each line defines a plugin:
 
 ```
-# Format: name,path,enabled,type,plugin_related_config_path
+# Format: name,path,enabled,type,plugin_related_config_path,venv_path
 # Example for a Python Modbus Slave plugin:
-modbus_slave,./core/src/drivers/plugins/python/modbus_slave/simple_modbus.py,1,0,./core/src/drivers/plugins/python/modbus_slave/modbus_slave_config.json
+modbus_slave,./core/src/drivers/plugins/python/modbus_slave/simple_modbus.py,1,0,./core/src/drivers/plugins/python/modbus_slave/modbus_slave_config.json,./venvs/modbus_slave
 # Example for a custom Python plugin:
-my_custom_plugin,./core/src/drivers/plugins/python/examples/my_custom_plugin.py,1,0,./my_custom_plugin_config.ini
-# Example for a future Native C plugin (not yet supported):
-# future_native_plugin,./plugins/native/example.so,1,1,./config/example.conf
+my_custom_plugin,./core/src/drivers/plugins/python/examples/my_custom_plugin.py,1,0,./my_custom_plugin_config.ini,./venvs/my_custom_plugin
+# Example for a Native C/C++ plugin:
+my_native_plugin,./core/src/drivers/plugins/native/my_plugin.so,1,1,./config/my_native_plugin.conf
 ```
 
 **Fields:**
 *   `name`: A unique identifier for the plugin.
-*   `path`: Path to the plugin file (`.py` for Python, `.so` for native C).
+*   `path`: Path to the plugin file (`.py` for Python, `.so` for native C/C++).
 *   `enabled`: `1` for enabled, `0` for disabled.
-*   `type`: `0` for Python (`PLUGIN_TYPE_PYTHON`), `1` for Native C (`PLUGIN_TYPE_NATIVE`). **Currently, only `0` is functional.**
+*   `type`: `0` for Python (`PLUGIN_TYPE_PYTHON`), `1` for Native C/C++ (`PLUGIN_TYPE_NATIVE`).
 *   `plugin_related_config_path`: (Optional) Path to a plugin-specific configuration file (e.g., `.ini`, `.json`, `.conf`).
+*   `venv_path`: (Optional, Python only) Path to a Python virtual environment for the plugin.
 
 ### Loading Configuration in Code
 The configuration is loaded and managed by the plugin driver:
@@ -278,9 +304,9 @@ python3 ./core/src/drivers/plugins/python/modbus_slave/simple_modbus.py
 
 ## Python Plugin Type System and Safety
 
-### Enhanced Type Safety with `python_plugin_types.py`
+### Enhanced Type Safety with the `shared` Module
 
-The `plugins/python/shared/python_plugin_types.py` module is crucial for developing robust Python plugins. It provides:
+The `plugins/python/shared/` package is crucial for developing robust Python plugins. It provides:
 
 #### Key Components
 
@@ -293,19 +319,24 @@ The `plugins/python/shared/python_plugin_types.py` module is crucial for develop
     *   Handles `mutex_take`/`mutex_give` automatically.
     *   Provides clear error messages for invalid access attempts (e.g., out of bounds, null pointers).
 
-3.  **`PluginStructureValidator`**
+3.  **`SafeLoggingAccess` Wrapper**
+    *   Provides safe access to the runtime logging functions.
+    *   Supports `log_info`, `log_debug`, `log_warn`, and `log_error` methods.
+
+4.  **`PluginStructureValidator`**
     *   Utilities for debugging, such as `print_structure_info()` to verify `ctypes` structure alignment and sizes against the C definitions.
 
-4.  **`safe_extract_runtime_args_from_capsule(runtime_args_capsule)`**
+5.  **`safe_extract_runtime_args_from_capsule(runtime_args_capsule)`**
     *   The **recommended** function to extract the `plugin_runtime_args_t` pointer from the `PyCapsule` passed to the `init` function.
     *   Performs comprehensive error checking (capsule validity, name, null pointer) and returns a tuple `(runtime_args_ptr, error_message)`.
 
 #### Usage Example (Reiterated from SafeBufferAccess)
 ```python
-from plugins.python.shared.python_plugin_types import (
+from shared import (
     PluginRuntimeArgs,  # For type hinting or direct use if extraction is manual
     safe_extract_runtime_args_from_capsule,
     SafeBufferAccess,
+    SafeLoggingAccess,
     PluginStructureValidator
 )
 
@@ -326,7 +357,7 @@ def init(runtime_args_capsule):
     if not _safe_buffer_access.is_valid:
         print(f"[Plugin Error] Failed to initialize SafeBufferAccess: {_safe_buffer_access.error_msg}")
         return False
-    
+
     print("Plugin initialized successfully.")
     return True
 
@@ -340,9 +371,10 @@ def init(runtime_args_capsule):
 1.  **Create your plugin file**, e.g., `my_driver.py`, in a suitable location like `plugins/python/` or a project-specific subdirectory.
     ```python
     #!/usr/bin/env python3
-    from plugins.python.shared.python_plugin_types import (
+    from shared import (
         safe_extract_runtime_args_from_capsule,
-        SafeBufferAccess
+        SafeBufferAccess,
+        SafeLoggingAccess
     )
 
     _safe_buffer_access = None
@@ -350,17 +382,17 @@ def init(runtime_args_capsule):
     def init(runtime_args_capsule):
         global _safe_buffer_access
         print("MyDriver: Initializing...")
-        
+
         runtime_args, error_msg = safe_extract_runtime_args_from_capsule(runtime_args_capsule)
         if runtime_args is None:
             print(f"MyDriver Error: {error_msg}")
             return False
-        
+
         _safe_buffer_access = SafeBufferAccess(runtime_args)
         if not _safe_buffer_access.is_valid:
             print(f"MyDriver Error: SafeBufferAccess init failed: {_safe_buffer_access.error_msg}")
             return False
-        
+
         # Perform other initializations, e.g., loading config, setting up hardware
         print("MyDriver: Initialized successfully.")
         return True
@@ -407,64 +439,86 @@ def init(runtime_args_capsule):
     *   Run OpenPLC. Check logs for "MyDriver: Initializing..." and "MyDriver: Initialized successfully."
     *   Test the functionality of your driver.
 
-### Creating a Native C Plugin (Future Guide)
-
-*This section outlines the intended process for when native C plugin support is implemented.*
+### Creating a Native C/C++ Plugin
 
 1.  **Implement required functions** in a C file (e.g., `my_native_plugin.c`):
     ```c
-    #include "plugin_driver.h" // Assuming this header will define the interface
     #include <stdio.h>
     #include <stdlib.h>
+    #include <string.h>
+    #include <pthread.h>
 
-    static plugin_runtime_args_t *g_runtime_args = NULL;
+    // Include IEC types from the OpenPLC runtime
+    #include "iec_types.h"
 
-    int init(plugin_runtime_args_t *args) {
-        if (!args) return -1; // Error
-        g_runtime_args = args;
-        printf("Native C Plugin: Initialized\n");
-        // Perform hardware initialization, etc.
-        return 0; // Success
+    // Define plugin_runtime_args_t structure locally to avoid Python dependencies
+    typedef struct {
+        IEC_BOOL *(*bool_input)[8];
+        IEC_BOOL *(*bool_output)[8];
+        IEC_BYTE **byte_input;
+        IEC_BYTE **byte_output;
+        IEC_UINT **int_input;
+        IEC_UINT **int_output;
+        IEC_UDINT **dint_input;
+        IEC_UDINT **dint_output;
+        IEC_ULINT **lint_input;
+        IEC_ULINT **lint_output;
+        IEC_UINT **int_memory;
+        IEC_UDINT **dint_memory;
+        IEC_ULINT **lint_memory;
+        int (*mutex_take)(pthread_mutex_t *mutex);
+        int (*mutex_give)(pthread_mutex_t *mutex);
+        pthread_mutex_t *buffer_mutex;
+        char plugin_specific_config_file_path[256];
+        int buffer_size;
+        int bits_per_buffer;
+    } plugin_runtime_args_t;
+
+    // IMPORTANT: Copy args during init - the pointer is freed after init returns
+    static plugin_runtime_args_t g_args;
+    static int plugin_initialized = 0;
+
+    int init(void *args) {
+        if (!args) return -1;
+        // Copy the entire structure - do NOT store the pointer
+        memcpy(&g_args, args, sizeof(plugin_runtime_args_t));
+        plugin_initialized = 1;
+        printf("Native Plugin: Initialized (buffer_size=%d)\n", g_args.buffer_size);
+        return 0;
     }
 
     void start_loop(void) {
-        printf("Native C Plugin: Starting operations\n");
+        if (!plugin_initialized) return;
+        printf("Native Plugin: Starting operations\n");
         // Start threads, timers, etc.
     }
 
     void stop_loop(void) {
-        printf("Native C Plugin: Stopping operations\n");
+        printf("Native Plugin: Stopping operations\n");
         // Signal threads to stop, etc.
     }
 
-    void run_cycle(void) {
-        // Example: safely read an input and write to an output
-        if (g_runtime_args && g_runtime_args->buffer_mutex) {
-            g_runtime_args->mutex_take(g_runtime_args->buffer_mutex);
-            // Assuming buffer_size > 0 and buffers are valid
-            IEC_UINT input_val = g_runtime_args->int_input[0][0]; // Read first word of first input buffer
-            g_runtime_args->int_output[0][0] = input_val;       // Write to first word of first output buffer
-            g_runtime_args->mutex_give(g_runtime_args->buffer_mutex);
-        }
-    }
-
     void cleanup(void) {
-        printf("Native C Plugin: Cleaning up\n");
-        // Release resources, close files, destroy threads.
-        g_runtime_args = NULL;
+        printf("Native Plugin: Cleaning up\n");
+        plugin_initialized = 0;
     }
     ```
 
 2.  **Compile as a shared library:**
     ```bash
-    gcc -shared -fPIC -I<path_to_openPLC_core_includes> -o my_native_plugin.so my_native_plugin.c
+    gcc -shared -fPIC -I/path/to/openplc-runtime/core/lib -o my_native_plugin.so my_native_plugin.c -lpthread
     ```
-    (The exact include paths and dependencies will be defined when native plugin support is developed).
+    See `plugins/native/examples/Makefile` for a complete build example.
 
-3.  **Add to `plugins.conf` (for future use):**
+3.  **Add to `plugins.conf`:**
     ```
-    my_native_plugin,./plugins/my_native_plugin.so,1,1,./config/my_native_plugin.conf
+    my_native_plugin,./path/to/my_native_plugin.so,1,1,./config/my_native_plugin.conf
     ```
+
+4.  **Test your plugin:**
+    *   Place the `.so` file at the specified path.
+    *   Run OpenPLC. Check logs for your plugin's initialization messages.
+    *   See `plugins/native/examples/test_plugin_loader.c` for a standalone test harness.
 
 ## Buffer Mapping
 
@@ -604,10 +658,11 @@ void plugin_driver_destroy(plugin_driver_t *driver);
 *   `pymodbus`: Required for the `simple_modbus.py` plugin.
 *   Other Python packages: As needed by specific custom plugins.
 
-### For Future Native C Plugins
-*   C Compiler (e.g., GCC).
+### For Native C/C++ Plugins
+*   C Compiler (e.g., GCC) with `-fPIC` and `-shared` support.
 *   Standard C library.
-*   Potentially other system-level libraries depending on the plugin's purpose.
+*   `pthread` library for mutex operations.
+*   `dl` library for dynamic loading (usually included by default).
 
 ## License
 
@@ -625,17 +680,22 @@ When contributing new plugins:
     *   Provide clear usage examples in comments or a separate `README`.
     *   Test your plugin thoroughly with various OpenPLC programs and I/O configurations.
     *   Ensure thread safety for all OpenPLC buffer interactions.
-2.  **Future Native C Plugins:**
-    *   Adhere to the C API once it's fully implemented and documented.
+2.  **Native C/C++ Plugins:**
+    *   Adhere to the C API defined in this document.
     *   Pay close attention to memory management and thread safety.
+    *   Remember to copy `plugin_runtime_args_t` contents during `init()` - do not store the pointer.
+    *   Test with the standalone loader before integrating with the full runtime.
 
 ## See Also
 
 *   `plugins/python/examples/example_python_plugin.py` - Basic Python plugin template.
 *   `plugins/python/modbus_slave/simple_modbus.py` - Advanced Modbus TCP slave implementation.
-*   `plugins/python/shared/python_plugin_types.py` - Core type definitions and safety utilities.
+*   `plugins/python/shared/` - Core type definitions and safety utilities for Python plugins.
+*   `plugins/native/examples/test_plugin.c` - Example native C plugin implementation.
+*   `plugins/native/examples/Makefile` - Build configuration for native plugins.
+*   `plugins/native/examples/test_plugin_loader.c` - Standalone test harness for native plugins.
 *   `plugins.conf` - Example active plugin configuration file.
-*   `core/src/drivers/plugin_driver.h` - C API for the plugin system (internal/future facing).
+*   `core/src/drivers/plugin_driver.h` - C API for the plugin system.
 *   `core/src/drivers/python_plugin_bridge.h` - C interface for Python integration.
 *   `docs/PLUGIN_VENV_GUIDE.md` - Guide on managing Python virtual environments for plugins.
 *   OpenPLC Runtime main documentation.
