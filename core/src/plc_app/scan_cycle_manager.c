@@ -27,7 +27,7 @@ static uint64_t ts_now_us(void)
     return (uint64_t)ts.tv_sec * 1000000ull + ts.tv_nsec / 1000;
 }
 
-void scan_cycle_time_start()
+void scan_cycle_time_start(void)
 {
     uint64_t now_us = ts_now_us();
 
@@ -78,7 +78,7 @@ void scan_cycle_time_start()
     pthread_mutex_unlock(&stats_mutex);
 }
 
-void scan_cycle_time_end()
+void scan_cycle_time_end(void)
 {
     uint64_t now_us = ts_now_us();
 

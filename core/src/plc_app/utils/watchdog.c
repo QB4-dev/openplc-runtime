@@ -5,10 +5,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "watchdog.h"
+#include "../plc_state_manager.h"
 #include "log.h"
 #include "utils.h"
-#include "../plc_state_manager.h"
+#include "watchdog.h"
 
 atomic_long plc_heartbeat;
 extern PLCState plc_state;
@@ -18,19 +18,22 @@ void *watchdog_thread(void *arg)
     (void)arg;
     long last = atomic_load(&plc_heartbeat);
 
-    while (1) 
+    while (1)
     {
         sleep(2); // Watch every 2 seconds
 
-        if (plc_get_state() != PLC_STATE_RUNNING) 
+        if (plc_get_state() != PLC_STATE_RUNNING)
         {
             continue; // Only monitor when PLC is running
         }
-        
+
         long now = atomic_load(&plc_heartbeat);
-        if (now == last) 
+        if (now == last)
         {
-            fprintf(stderr, "[Watchdog] No heartbeat! PLC unresponsive.\n"); // Use stderr to ensure visibility and avoid lockups in log system
+            fprintf(
+                stderr,
+                "[Watchdog] No heartbeat! PLC unresponsive.\n"); // Use stderr to ensure visibility
+                                                                 // and avoid lockups in log system
             exit(EXIT_FAILURE);
         }
 
@@ -40,10 +43,10 @@ void *watchdog_thread(void *arg)
     return NULL;
 }
 
-int watchdog_init() 
+int watchdog_init(void)
 {
     pthread_t wd_thread;
-    if (pthread_create(&wd_thread, NULL, watchdog_thread, NULL) != 0) 
+    if (pthread_create(&wd_thread, NULL, watchdog_thread, NULL) != 0)
     {
         log_error("Failed to create watchdog thread");
         return -1;

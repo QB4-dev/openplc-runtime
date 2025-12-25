@@ -17,11 +17,11 @@ typedef enum
 } plugin_type_t;
 
 typedef int (*plugin_init_func_t)(void *);
-typedef void (*plugin_start_loop_func_t)();
-typedef void (*plugin_stop_loop_func_t)();
-typedef void (*plugin_cycle_start_func_t)();
-typedef void (*plugin_cycle_end_func_t)();
-typedef void (*plugin_cleanup_func_t)();
+typedef void (*plugin_start_loop_func_t)(void);
+typedef void (*plugin_stop_loop_func_t)(void);
+typedef void (*plugin_cycle_start_func_t)(void);
+typedef void (*plugin_cycle_end_func_t)(void);
+typedef void (*plugin_cleanup_func_t)(void);
 
 // Logging function pointer types
 typedef void (*plugin_log_info_func_t)(const char *fmt, ...);
