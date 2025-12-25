@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include "image_tables.h"
+#include "include/iec_python.h"
 #include "log.h"
 #include "utils.h"
 
@@ -101,6 +102,16 @@ int symbols_init(PluginManager *pm)
     ext_setBufferPointers(bool_input, bool_output, byte_input, byte_output, int_input, int_output,
                           dint_input, dint_output, lint_input, lint_output, int_memory, dint_memory,
                           lint_memory);
+
+    // Initialize Python loader logging callbacks (optional - only present if Python FBs are used)
+    void (*ext_python_loader_set_loggers)(void (*)(const char *, ...), void (*)(const char *, ...));
+    *(void **)(&ext_python_loader_set_loggers) =
+        plugin_manager_get_func(pm, void (*)(unsigned long), "python_loader_set_loggers");
+    if (ext_python_loader_set_loggers)
+    {
+        ext_python_loader_set_loggers(log_info, log_error);
+        log_info("Python loader logging callbacks initialized");
+    }
 
     return 0;
 }

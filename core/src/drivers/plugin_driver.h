@@ -17,11 +17,11 @@ typedef enum
 } plugin_type_t;
 
 typedef int (*plugin_init_func_t)(void *);
-typedef void (*plugin_start_loop_func_t)();
-typedef void (*plugin_stop_loop_func_t)();
-typedef void (*plugin_cycle_start_func_t)();
-typedef void (*plugin_cycle_end_func_t)();
-typedef void (*plugin_cleanup_func_t)();
+typedef void (*plugin_start_loop_func_t)(void);
+typedef void (*plugin_stop_loop_func_t)(void);
+typedef void (*plugin_cycle_start_func_t)(void);
+typedef void (*plugin_cycle_end_func_t)(void);
+typedef void (*plugin_cleanup_func_t)(void);
 
 // Logging function pointer types
 typedef void (*plugin_log_info_func_t)(const char *fmt, ...);
@@ -97,6 +97,7 @@ typedef struct
 // Driver management functions
 plugin_driver_t *plugin_driver_create(void);
 int plugin_driver_load_config(plugin_driver_t *driver, const char *config_file);
+int plugin_driver_update_config(plugin_driver_t *driver, const char *config_file);
 int plugin_driver_init(plugin_driver_t *driver);
 int plugin_driver_start(plugin_driver_t *driver);
 int plugin_driver_stop(plugin_driver_t *driver);
@@ -104,6 +105,12 @@ int plugin_driver_restart(plugin_driver_t *driver);
 void plugin_driver_destroy(plugin_driver_t *driver);
 int plugin_mutex_take(pthread_mutex_t *mutex);
 int plugin_mutex_give(pthread_mutex_t *mutex);
+
+// Cycle hook functions for native plugins (called during PLC scan cycle)
+// These iterate through all active native plugins and call their cycle hooks
+// Plugins opt-in by implementing cycle_start/cycle_end; opt-out by not implementing them
+void plugin_driver_cycle_start(plugin_driver_t *driver);
+void plugin_driver_cycle_end(plugin_driver_t *driver);
 
 // Python plugin functions
 int python_plugin_get_symbols(plugin_instance_t *plugin);

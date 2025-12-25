@@ -505,13 +505,15 @@ State transitions are validated and logged. See `core/src/plc_app/plc_state_mana
 
 ### Plugin System
 
-Plugins extend I/O capabilities:
+Plugins extend I/O capabilities. Both Python and native C/C++ plugins are supported:
 
-1. **Configuration:** `plugins.conf` defines enabled plugins
-2. **Loading:** `plugin_driver_load_config()` parses configuration
-3. **Initialization:** `plugin_driver_init()` initializes plugins
-4. **Execution:** Plugins called during scan cycle
-5. **Cleanup:** `plugin_driver_destroy()` cleans up resources
+1. **Configuration:** `plugins.conf` defines enabled plugins (type 0=Python, 1=Native)
+2. **Loading:** `plugin_driver_load_config()` parses configuration and loads symbols
+3. **Initialization:** `plugin_driver_init()` calls each plugin's `init()` function
+4. **Execution:** `plugin_driver_start()` calls each plugin's `start_loop()` function
+5. **Cleanup:** `plugin_driver_destroy()` calls `cleanup()` and releases resources
+
+See `core/src/drivers/README.md` for detailed plugin development documentation.
 
 ### Debug Protocol
 

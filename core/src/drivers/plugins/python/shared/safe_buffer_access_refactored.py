@@ -110,6 +110,14 @@ class SafeBufferAccess(ISafeBufferAccess):
         """Read a boolean output value."""
         return self.buffer_accessor.read_buffer("bool_output", buffer_idx, bit_idx, thread_safe)
 
+    def write_bool_input(
+        self, buffer_idx: int, bit_idx: int, value: bool, thread_safe: bool = True
+    ) -> Tuple[bool, str]:
+        """Write a boolean input value (used by Modbus master to update PLC inputs)."""
+        return self.buffer_accessor.write_buffer(
+            "bool_input", buffer_idx, value, bit_idx, thread_safe
+        )
+
     def write_bool_output(
         self, buffer_idx: int, bit_idx: int, value: bool, thread_safe: bool = True
     ) -> Tuple[bool, str]:

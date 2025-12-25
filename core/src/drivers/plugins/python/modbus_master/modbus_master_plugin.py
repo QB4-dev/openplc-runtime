@@ -30,9 +30,11 @@ from shared.plugin_config_decode.modbus_master_config_model import (
 try:
     # Try relative imports first (when used as package)
     from .modbus_master_connection import ModbusConnectionManager
-    from .modbus_master_memory import (
-        read_data_for_modbus_write,
-        update_iec_buffer_from_modbus_data,
+    from .modbus_master_memory import (  # Optimized functions for minimal mutex hold time
+        convert_modbus_data_to_iec_values,
+        convert_raw_iec_to_modbus,
+        read_raw_iec_values,
+        write_preconverted_iec_values,
     )
     from .modbus_master_utils import (
         calculate_gcd_of_cycle_times,
@@ -42,9 +44,11 @@ try:
 except ImportError:
     # Fallback to absolute imports (when run standalone)
     from modbus_master_connection import ModbusConnectionManager
-    from modbus_master_memory import (
-        read_data_for_modbus_write,
-        update_iec_buffer_from_modbus_data,
+    from modbus_master_memory import (  # Optimized functions for minimal mutex hold time
+        convert_modbus_data_to_iec_values,
+        convert_raw_iec_to_modbus,
+        read_raw_iec_values,
+        write_preconverted_iec_values,
     )
     from modbus_master_utils import (
         calculate_gcd_of_cycle_times,
@@ -215,60 +219,107 @@ class ModbusSlaveDevice(threading.Thread):
                         self.connection_manager.mark_disconnected()
 
                 # Batch update IEC buffers with single mutex acquisition
+                # OPTIMIZATION: Pre-convert all Modbus data to IEC values BEFORE
+                # acquiring the mutex to minimize mutex hold time
                 if read_results_to_update:
-                    lock_acquired, lock_msg = self.sba.acquire_mutex()
-                    if lock_acquired:
-                        try:
-                            for iec_addr, modbus_data, length in read_results_to_update:
-                                update_iec_buffer_from_modbus_data(
-                                    self.sba, iec_addr, modbus_data, length
-                                )
-                        finally:
-                            self.sba.release_mutex()
-                    else:
-                        print(
-                            f"[{self.name}] (FAIL) Failed to acquire mutex "
-                            f"for read updates: {lock_msg}"
+                    # Phase 1: Pre-convert all data outside the mutex
+                    preconverted_updates = []
+                    for iec_addr, modbus_data, length in read_results_to_update:
+                        converted_values, details = convert_modbus_data_to_iec_values(
+                            iec_addr, modbus_data, length
                         )
+                        if converted_values is not None and details is not None:
+                            preconverted_updates.append((converted_values, details))
+                        else:
+                            print(
+                                f"[{self.name}] (FAIL) Data conversion failed "
+                                f"for IEC address {iec_addr}, length={length}"
+                            )
+
+                    # Phase 2: Write pre-converted values under the mutex
+                    if preconverted_updates:
+                        lock_acquired, lock_msg = self.sba.acquire_mutex()
+                        if lock_acquired:
+                            try:
+                                for converted_values, details in preconverted_updates:
+                                    write_preconverted_iec_values(
+                                        self.sba, converted_values, details
+                                    )
+                            finally:
+                                self.sba.release_mutex()
+                        else:
+                            print(
+                                f"[{self.name}] (FAIL) Failed to acquire mutex "
+                                f"for read updates: {lock_msg}"
+                            )
 
                 # 2. WRITE OPERATIONS - Process only I/O points that are due for polling this cycle
+                # OPTIMIZATION: Batch all write preparations under a single mutex acquisition
+                # to minimize mutex hold time. Read all raw IEC values at once, then convert
+                # and write to Modbus outside the mutex.
+
+                # Phase 1: Collect all write points that are due this cycle
+                write_points_due = []
                 for point in io_points:
                     if self._stop_event.is_set():
                         break
 
-                    # Skip if this point doesn't need to be polled this cycle
                     if point.fc not in [5, 6, 15, 16]:  # Write functions
                         continue
 
-                    # Check if point should be polled this cycle
                     point_cycle_multiple = point.cycle_time_ms // self.gcd_cycle_time_ms
                     if (cycle_counter % point_cycle_multiple) != 0:
                         continue
 
                     try:
-                        # Parse Modbus offset
                         address = parse_modbus_offset(point.offset)
+                        write_points_due.append((point, address))
+                    except ValueError as ve:
+                        print(
+                            f"[{self.name}] (FAIL) Invalid offset "
+                            f"'{point.offset}' for FC {point.fc}: {ve}"
+                        )
 
-                        # Read data from IEC buffers (with mutex)
-                        lock_acquired, lock_msg = self.sba.acquire_mutex()
-                        if not lock_acquired:
-                            print(
-                                f"[{self.name}] (FAIL) Failed to acquire mutex "
-                                f"for write prep (FC {point.fc}, "
-                                f"offset {point.offset}): {lock_msg}"
-                            )
-                            continue
-
+                # Phase 2: Read all raw IEC values under a single mutex acquisition
+                raw_iec_data = []  # List of (point, address, raw_values, details, iec_size)
+                if write_points_due:
+                    lock_acquired, lock_msg = self.sba.acquire_mutex()
+                    if lock_acquired:
                         try:
-                            values_to_write = read_data_for_modbus_write(
-                                self.sba, point.iec_location, point.length
-                            )
+                            for point, address in write_points_due:
+                                raw_values, details, iec_size = read_raw_iec_values(
+                                    self.sba, point.iec_location, point.length
+                                )
+                                if raw_values is not None:
+                                    raw_iec_data.append(
+                                        (point, address, raw_values, details, iec_size)
+                                    )
+                                else:
+                                    print(
+                                        f"[{self.name}] (FAIL) Failed to read raw IEC data "
+                                        f"for write (FC {point.fc}, offset {point.offset})"
+                                    )
                         finally:
                             self.sba.release_mutex()
+                    else:
+                        print(
+                            f"[{self.name}] (FAIL) Failed to acquire mutex "
+                            f"for batch write prep: {lock_msg}"
+                        )
+
+                # Phase 3: Convert raw IEC values to Modbus format (outside mutex)
+                # and perform Modbus writes
+                for point, address, raw_values, details, iec_size in raw_iec_data:
+                    if self._stop_event.is_set():
+                        break
+
+                    try:
+                        # Convert raw IEC values to Modbus format (outside mutex)
+                        values_to_write = convert_raw_iec_to_modbus(raw_values, details, iec_size)
 
                         if values_to_write is None:
                             print(
-                                f"[{self.name}] (FAIL) Failed to read data "
+                                f"[{self.name}] (FAIL) Failed to convert data "
                                 f"for Modbus write (FC {point.fc}, "
                                 f"offset {point.offset})"
                             )
@@ -315,34 +366,25 @@ class ModbusSlaveDevice(threading.Thread):
                                 f"[{self.name}] (FAIL) Modbus write error "
                                 f"(FC {point.fc}, addr {address}): {response}"
                             )
-                            # Mark as disconnected to force reconnection on next cycle
                             self.connection_manager.mark_disconnected()
                         elif response.isError():
                             print(
                                 f"[{self.name}] (FAIL) Modbus write failed "
                                 f"(FC {point.fc}, addr {address}): {response}"
                             )
-                            # Mark as disconnected to force reconnection on next cycle
                             self.connection_manager.mark_disconnected()
 
-                    except ValueError as ve:
-                        print(
-                            f"[{self.name}] (FAIL) Invalid offset "
-                            f"'{point.offset}' for FC {point.fc}: {ve}"
-                        )
                     except ConnectionException as ce:
                         print(
                             f"[{self.name}] (FAIL) Connection error writing "
                             f"FC {point.fc}, offset {point.offset}: {ce}"
                         )
-                        # Mark as disconnected to force reconnection
                         self.connection_manager.mark_disconnected()
                     except Exception as e:
                         print(
                             f"[{self.name}] (FAIL) Error writing "
                             f"FC {point.fc}, offset {point.offset}: {e}"
                         )
-                        # For other errors also mark disconnected as precaution
                         self.connection_manager.mark_disconnected()
 
                 # 3. CYCLE TIMING - Sleep for GCD cycle time
