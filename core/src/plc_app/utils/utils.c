@@ -2,28 +2,53 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <unistd.h>
 
-unsigned long long *ext_common_ticktime__ = NULL;
-unsigned long tick__ = 0;
-char *ext_plc_program_md5 = NULL;
+// MSYS2/Cygwin does not support mlockall or real-time scheduling
+// These features are only available on Linux
+#if !defined(__CYGWIN__) && !defined(__MSYS__)
+#include <sys/mman.h>
+#define HAS_REALTIME_FEATURES 1
+#else
+#define HAS_REALTIME_FEATURES 0
+#endif
 
-void normalize_timespec(struct timespec *ts) 
+unsigned long long *ext_common_ticktime__ = NULL;
+unsigned long tick__                      = 0;
+char *ext_plc_program_md5                 = NULL;
+
+void normalize_timespec(struct timespec *ts)
 {
-    while (ts->tv_nsec >= 1e9) 
+    while (ts->tv_nsec >= 1e9)
     {
         ts->tv_nsec -= 1e9;
         ts->tv_sec++;
     }
 }
 
-void sleep_until(struct timespec *ts) 
+void sleep_until(struct timespec *ts)
 {
+#if HAS_REALTIME_FEATURES
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ts, NULL);
+#else
+    // Fallback for MSYS2/Cygwin: use nanosleep (relative sleep)
+    struct timespec now, remaining;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    remaining.tv_sec  = ts->tv_sec - now.tv_sec;
+    remaining.tv_nsec = ts->tv_nsec - now.tv_nsec;
+    if (remaining.tv_nsec < 0)
+    {
+        remaining.tv_sec--;
+        remaining.tv_nsec += 1000000000L;
+    }
+    if (remaining.tv_sec >= 0)
+    {
+        nanosleep(&remaining, NULL);
+    }
+#endif
 }
 
-void timespec_diff(struct timespec *a, struct timespec *b, struct timespec *result) 
+void timespec_diff(struct timespec *a, struct timespec *b, struct timespec *result)
 {
     // Calculate the difference in seconds
     result->tv_sec = a->tv_sec - b->tv_sec;
@@ -32,7 +57,7 @@ void timespec_diff(struct timespec *a, struct timespec *b, struct timespec *resu
     result->tv_nsec = a->tv_nsec - b->tv_nsec;
 
     // Handle borrowing if nanoseconds are negative
-    if (result->tv_nsec < 0) 
+    if (result->tv_nsec < 0)
     {
         // Borrow 1 second (1e9 nanoseconds)
         --result->tv_sec;
@@ -41,24 +66,30 @@ void timespec_diff(struct timespec *a, struct timespec *b, struct timespec *resu
 }
 
 // configure SCHED_FIFO priority
-void set_realtime_priority(void) 
+void set_realtime_priority(void)
 {
+#if HAS_REALTIME_FEATURES
     struct sched_param param;
     param.sched_priority = 20; // Priority between 1 and 99
 
-    if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) 
+    if (sched_setscheduler(0, SCHED_FIFO, &param) != 0)
     {
         log_error("sched_setscheduler failed: %s", strerror(errno));
-    } 
-    else 
+    }
+    else
     {
         log_info("Scheduler set to SCHED_FIFO, priority %d", param.sched_priority);
     }
+#else
+    // Real-time scheduling not available on MSYS2/Cygwin
+    log_info("Real-time scheduling not available on this platform");
+#endif
 }
 
 // Lock all memory pages to prevent page faults during PLC execution
 void lock_memory(void)
 {
+#if HAS_REALTIME_FEATURES
     if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0)
     {
         log_error("mlockall failed: %s", strerror(errno));
@@ -67,11 +98,15 @@ void lock_memory(void)
     {
         log_info("Memory locked successfully (MCL_CURRENT | MCL_FUTURE)");
     }
+#else
+    // Memory locking not available on MSYS2/Cygwin
+    log_info("Memory locking not available on this platform");
+#endif
 }
 
 size_t parse_hex_string(const char *hex_string, uint8_t *data)
 {
-    size_t count = 0;
+    size_t count    = 0;
     const char *ptr = hex_string;
 
     while (*ptr != '\0')
@@ -107,7 +142,8 @@ size_t parse_hex_string(const char *hex_string, uint8_t *data)
     return count;
 }
 
-void bytes_to_hex_string(const uint8_t *bytes, size_t len, char *out_str, size_t out_size, const char *prepend)
+void bytes_to_hex_string(const uint8_t *bytes, size_t len, char *out_str, size_t out_size,
+                         const char *prepend)
 {
     size_t pos = 0;
 
@@ -135,7 +171,7 @@ void bytes_to_hex_string(const uint8_t *bytes, size_t len, char *out_str, size_t
         if (written < 0 || (size_t)written >= out_size - pos)
         {
             // Stop if buffer is full or error
-            break; 
+            break;
         }
 
         pos += written;
@@ -147,7 +183,7 @@ void bytes_to_hex_string(const uint8_t *bytes, size_t len, char *out_str, size_t
                 break;
             }
             out_str[pos++] = ' ';
-            out_str[pos] = '\0';
+            out_str[pos]   = '\0';
         }
     }
 
@@ -161,4 +197,3 @@ void bytes_to_hex_string(const uint8_t *bytes, size_t len, char *out_str, size_t
         out_str[out_size - 1] = '\0';
     }
 }
-

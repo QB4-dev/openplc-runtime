@@ -19,6 +19,12 @@ add_compile_options(-Wall -Werror  -Wextra -fstack-protector-strong
     -D_FORTIFY_SOURCE=2 -O2 -Wformat
     -Werror=format-security -fPIC -fPIE)
 
+# On Cygwin/MSYS2, disable treating _POSIX_C_SOURCE redefinition as error
+# This is caused by a conflict between Python headers and system headers
+if(CYGWIN OR MSYS)
+    add_compile_options(-Wno-error=cpp)
+endif()
+
 
 # Step 3: Build the executable and link against the shared library
 add_executable(plc_main
@@ -37,9 +43,9 @@ add_executable(plc_main
 )
 
 # Link against shared library
-target_link_libraries(plc_main 
-    dl 
-    pthread 
+target_link_libraries(plc_main
+    dl
+    pthread
     ${PYTHON_LIBRARIES}
 )
 
