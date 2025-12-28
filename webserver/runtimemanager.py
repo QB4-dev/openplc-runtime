@@ -4,13 +4,24 @@ import subprocess
 import threading
 import time
 
-import psutil
+# psutil is optional - not available on MSYS2/Cygwin platforms
+try:
+    import psutil
+
+    HAS_PSUTIL = True
+except ImportError:
+    psutil = None
+    HAS_PSUTIL = False
 
 from webserver.logger import get_logger
 from webserver.unixclient import SyncUnixClient
 from webserver.unixserver import UnixLogServer
 
 logger, buffer = get_logger("logger", use_buffer=True)
+
+# Log once if psutil is not available
+if not HAS_PSUTIL:
+    logger.info("psutil not available - process detection features disabled")
 
 
 class RuntimeManager:
@@ -26,8 +37,13 @@ class RuntimeManager:
 
     def find_running_process(self):
         """
-        Find the running PLC runtime process
+        Find the running PLC runtime process.
+        Returns None if psutil is not available (MSYS2/Cygwin).
         """
+        if not HAS_PSUTIL:
+            # Cannot detect existing processes without psutil
+            return None
+
         # Find the running PLC runtime process by executable path
         for proc in psutil.process_iter(["pid", "exe", "cmdline"]):
             try:
@@ -133,7 +149,7 @@ class RuntimeManager:
         """
         if self.process is None:
             return False
-        if isinstance(self.process, psutil.Process):
+        if HAS_PSUTIL and isinstance(self.process, psutil.Process):
             if self.process.is_running() and self.process.status() != psutil.STATUS_ZOMBIE:
                 return True
         elif isinstance(self.process, subprocess.Popen):
@@ -183,7 +199,7 @@ class RuntimeManager:
         self.monitor_thread.join(timeout=5)
         time.sleep(1)
         if self.process:
-            if isinstance(self.process, psutil.Process):
+            if HAS_PSUTIL and isinstance(self.process, psutil.Process):
                 self.process.terminate()
                 try:
                     self.process.wait(timeout=5)

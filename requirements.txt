@@ -8,4 +8,4 @@ python-dotenv
 pytest
 pytest-flask
 pre-commit
-psutil
+psutil; sys_platform != "cygwin"
