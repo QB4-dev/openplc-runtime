@@ -1,5 +1,17 @@
 #define PY_SSIZE_T_CLEAN
+
+// Suppress _POSIX_C_SOURCE redefinition warning from Python.h on MSYS2/Cygwin
+// Python.h defines _POSIX_C_SOURCE to 200809L which conflicts with system headers
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcpp"
+#endif
+
 #include <Python.h>
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 #include "../plc_app/image_tables.h"
 #include "../plc_app/utils/log.h"

@@ -19,14 +19,6 @@ add_compile_options(-Wall -Werror  -Wextra -fstack-protector-strong
     -D_FORTIFY_SOURCE=2 -O2 -Wformat
     -Werror=format-security -fPIC -fPIE)
 
-# On Cygwin/MSYS2, the Python headers redefine _POSIX_C_SOURCE which causes a warning
-# We suppress this specific warning to avoid treating it as an error
-# Detection: CMAKE_SYSTEM_NAME is "CYGWIN" or "MSYS" on these platforms
-if(CMAKE_SYSTEM_NAME MATCHES "CYGWIN|MSYS")
-    add_compile_options(-Wno-cpp)
-endif()
-
-
 # Step 3: Build the executable and link against the shared library
 add_executable(plc_main
     ${CMAKE_SOURCE_DIR}/core/src/plc_app/plc_main.c
