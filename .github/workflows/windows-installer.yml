@@ -46,49 +46,17 @@ jobs:
           restore-keys: |
             msys2-packages-${{ runner.os }}-
 
-      - name: Provision OpenPLC Runtime in MSYS2
+      - name: Install OpenPLC Runtime using install.sh
         shell: msys2 {0}
         run: |
           echo "=========================================="
-          echo "Provisioning OpenPLC Runtime"
+          echo "Installing OpenPLC Runtime via install.sh"
           echo "=========================================="
 
-          # Set up directories
-          OPENPLC_DIR="$(pwd)"
-          VENV_DIR="$OPENPLC_DIR/venvs/runtime"
+          # Run the install script which handles all dependencies and build
+          ./install.sh
 
-          echo "OpenPLC Directory: $OPENPLC_DIR"
-
-          # Verify installations
-          echo "GCC version: $(gcc --version | head -n1)"
-          echo "Python version: $(python3 --version)"
-          echo "CMake version: $(cmake --version | head -n1)"
-
-          # Create virtual environment
-          echo "Creating Python virtual environment..."
-          python3 -m venv "$VENV_DIR"
-
-          # Upgrade pip and install dependencies
-          echo "Installing Python dependencies..."
-          "$VENV_DIR/bin/python3" -m pip install --upgrade pip setuptools wheel
-          "$VENV_DIR/bin/python3" -m pip install -r "$OPENPLC_DIR/requirements.txt"
-          "$VENV_DIR/bin/python3" -m pip install -e .
-
-          # Build OpenPLC Runtime
-          echo "Building OpenPLC Runtime..."
-          mkdir -p "$OPENPLC_DIR/build"
-          cd "$OPENPLC_DIR/build"
-          cmake ..
-          make -j$(nproc)
-          cd "$OPENPLC_DIR"
-
-          # Create installation marker
-          echo "Installation completed at $(date)" > "$OPENPLC_DIR/.installed"
-
-          # Create runtime directory
-          mkdir -p /run/runtime
-
-          echo "Provisioning complete!"
+          echo "Installation complete!"
 
       - name: Prepare installer payload
         shell: pwsh
