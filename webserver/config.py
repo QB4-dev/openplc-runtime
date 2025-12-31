@@ -1,18 +1,38 @@
 import os
+import platform
 import re
 import secrets
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from webserver.logger import get_logger, LogParser
+
+from webserver.logger import get_logger
 
 logger, buffer = get_logger("logger", use_buffer=True)
 
-# Use /var/run/runtime for persistent data to avoid Docker volume permission issues
-# This directory is created in the Dockerfile and can use a named volume
-ENV_PATH = Path("/var/run/runtime/.env")
-DB_PATH = Path("/var/run/runtime/restapi.db")
+
+def get_runtime_dir():
+    """
+    Get the runtime directory path based on the platform.
+    On MSYS2/Cygwin, use /run/runtime (which maps to a Windows path).
+    On Linux, use /var/run/runtime for Docker volume compatibility.
+    """
+    if platform.system() != "Linux":
+        runtime_dir = Path("/run/runtime")
+    else:
+        runtime_dir = Path("/var/run/runtime")
+
+    # Ensure the directory exists
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    return runtime_dir
+
+
+RUNTIME_DIR = get_runtime_dir()
+ENV_PATH = RUNTIME_DIR / ".env"
+DB_PATH = RUNTIME_DIR / "restapi.db"
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
 
 # Function to validate environment variable values
 def is_valid_env(var_name, value):
@@ -29,7 +49,7 @@ def generate_env_file():
     pepper = secrets.token_hex(32)
     uri = f"sqlite:///{DB_PATH}"
 
-    with open(ENV_PATH, "w") as f:
+    with open(ENV_PATH, "w", encoding="utf-8") as f:
         f.write("FLASK_ENV=development\n")
         f.write(f"SQLALCHEMY_DATABASE_URI={uri}\n")
         f.write(f"JWT_SECRET_KEY={jwt}\n")
@@ -62,9 +82,7 @@ except RuntimeError as e:
     logger.error("%s", e)
     # Need to regenerate .env file and remove the database as well
     response = (
-        input(
-            "Do you want to regenerate the .env file? This will delete your database. [y/N]: "
-        )
+        input("Do you want to regenerate the .env file? This will delete your database. [y/N]: ")
         .strip()
         .lower()
     )
@@ -74,21 +92,21 @@ except RuntimeError as e:
         load_dotenv(ENV_PATH)
     else:
         print("Exiting due to invalid environment configuration.")
-        exit(1)
+        sys.exit(1)
 
 
-class Config:
+class Config:  # pylint: disable=too-few-public-methods
     SQLALCHEMY_DATABASE_URI = os.environ["SQLALCHEMY_DATABASE_URI"]
     JWT_SECRET_KEY = os.environ["JWT_SECRET_KEY"]
     PEPPER = os.environ["PEPPER"]
 
 
-class DevConfig(Config):
+class DevConfig(Config):  # pylint: disable=too-few-public-methods
     SQLALCHEMY_TRACK_MODIFICATIONS = False  # keep performance parity with prod
     DEBUG = True
 
 
-class ProdConfig(Config):
+class ProdConfig(Config):  # pylint: disable=too-few-public-methods
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     DEBUG = False
     ENV = "production"
