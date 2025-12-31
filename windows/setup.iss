@@ -30,6 +30,8 @@ PrivilegesRequiredOverridesAllowed=dialog
 ; Output settings
 OutputDir=output
 OutputBaseFilename=OpenPLC_Runtime_Setup
+SetupIconFile=openplc.ico
+UninstallDisplayIcon={app}\openplc.ico
 
 ; Compression settings (LZMA2 for best compression of large files)
 Compression=lzma2/ultra64
@@ -59,15 +61,16 @@ Source: "payload\openplc-runtime\*"; DestDir: "{app}\openplc-runtime"; Flags: ig
 
 ; Launcher and support files
 Source: "StartOpenPLC.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "openplc.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; Start Menu shortcuts (per-user, no admin needed)
-Name: "{userprograms}\{#MyAppName}\Start OpenPLC Runtime"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
+Name: "{userprograms}\{#MyAppName}\Start OpenPLC Runtime"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\openplc.ico"
 Name: "{userprograms}\{#MyAppName}\MSYS2 Terminal"; Filename: "{app}\msys64\msys2.exe"; WorkingDir: "{app}\msys64"
 Name: "{userprograms}\{#MyAppName}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 ; Desktop shortcut (optional)
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\openplc.ico"; Tasks: desktopicon
 
 [Run]
 ; Option to start OpenPLC after installation
