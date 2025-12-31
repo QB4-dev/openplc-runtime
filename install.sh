@@ -61,6 +61,79 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Check if systemd is available and functional
+# Returns 0 if systemd is available, 1 otherwise
+has_systemd_support() {
+    # Skip on MSYS2/Windows
+    if is_msys2; then
+        return 1
+    fi
+
+    # Check if systemctl command exists
+    if ! command -v systemctl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # Check if systemd is running as PID 1
+    # This handles Docker containers and GitHub Actions where systemctl may exist but systemd isn't PID 1
+    if [ ! -d "/run/systemd/system" ]; then
+        return 1
+    fi
+
+    # Additional check: verify PID 1 is actually systemd
+    if [ -f "/proc/1/comm" ]; then
+        local pid1_name
+        pid1_name=$(cat /proc/1/comm 2>/dev/null)
+        if [ "$pid1_name" != "systemd" ]; then
+            return 1
+        fi
+    fi
+
+    # Final check: can we actually communicate with systemd?
+    # Use 'if' to prevent set -e from aborting on failure
+    if ! systemctl show-environment >/dev/null 2>&1; then
+        return 1
+    fi
+
+    return 0
+}
+
+# Install systemd service for OpenPLC Runtime
+install_systemd_service() {
+    local service_file="/etc/systemd/system/openplc-runtime.service"
+
+    log_info "Installing OpenPLC Runtime systemd service..."
+
+    # Create the service file
+    cat > "$service_file" <<EOF
+[Unit]
+Description=OpenPLC Runtime v4 Service
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=root
+Group=root
+WorkingDirectory=$OPENPLC_DIR
+ExecStart=$OPENPLC_DIR/start_openplc.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Reload systemd daemon to recognize the new service
+    systemctl daemon-reload
+
+    # Enable and start the service
+    log_info "Enabling and starting OpenPLC Runtime service..."
+    systemctl enable --now openplc-runtime.service
+
+    log_success "OpenPLC Runtime service installed and started"
+    return 0
+}
+
 # Ensure we're in the project directory
 cd "$OPENPLC_DIR"
 
@@ -305,14 +378,42 @@ setup_plugin_venvs
 echo "Compiling OpenPLC..."
 if compile_plc; then
     echo "Build process completed successfully!"
-    echo "OpenPLC Runtime v4 is ready to use."
-    echo ""
-    echo "To start the OpenPLC Runtime v4, run:"
-    echo "sudo ./start_openplc.sh"
 
-    # Create installation marker
+    # Create installation marker (must be done before starting the service)
     touch "$OPENPLC_DIR/.installed"
     echo "Installation completed at $(date)" > "$OPENPLC_DIR/.installed"
+
+    # Check if systemd is available and install the service
+    SYSTEMD_SERVICE_INSTALLED=0
+    if has_systemd_support; then
+        log_info "Systemd detected. Installing OpenPLC Runtime service..."
+        if install_systemd_service; then
+            SYSTEMD_SERVICE_INSTALLED=1
+        else
+            log_warning "Failed to install systemd service. You can start the runtime manually."
+        fi
+    else
+        log_info "Systemd not available. Skipping service installation."
+    fi
+
+    echo ""
+    echo "OpenPLC Runtime v4 is ready to use."
+    echo ""
+
+    if [ "$SYSTEMD_SERVICE_INSTALLED" -eq 1 ]; then
+        echo "The OpenPLC Runtime service has been installed and started."
+        echo "The runtime will automatically start on system boot."
+        echo ""
+        echo "Useful commands:"
+        echo "  sudo systemctl status openplc-runtime   - Check service status"
+        echo "  sudo systemctl stop openplc-runtime     - Stop the service"
+        echo "  sudo systemctl start openplc-runtime    - Start the service"
+        echo "  sudo systemctl restart openplc-runtime  - Restart the service"
+        echo "  sudo journalctl -u openplc-runtime -f   - View service logs"
+    else
+        echo "To start the OpenPLC Runtime v4, run:"
+        echo "sudo ./start_openplc.sh"
+    fi
 
 else
     echo "ERROR: Build process failed!" >&2
