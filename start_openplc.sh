@@ -9,8 +9,24 @@ VENV_DIR="$OPENPLC_DIR/venvs/runtime"
 # Ensure we're in the project directory
 cd "$OPENPLC_DIR"
 
-check_root() 
+# Detect if running on MSYS2/MinGW/Cygwin (Windows)
+is_msys2() {
+    case "$(uname -s)" in
+        MSYS*|MINGW*|CYGWIN*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+check_root()
 {
+    if is_msys2; then
+        # Root is not required/meaningful on MSYS2
+        return 0
+    fi
     if [[ $EUID -ne 0 ]]; then
         echo "ERROR: This script must be run as root" >&2
         echo "Example: sudo ./start_openplc.sh" >&2
@@ -23,7 +39,11 @@ check_installation()
     if [ ! -f "$OPENPLC_DIR/.installed" ]; then
         echo "ERROR: OpenPLC Runtime v4 is not installed." >&2
         echo "Please run the install script first:" >&2
-        echo "  sudo ./install.sh" >&2
+        if is_msys2; then
+            echo "  ./install.sh" >&2
+        else
+            echo "  sudo ./install.sh" >&2
+        fi
         exit 1
     fi
 }
@@ -82,27 +102,27 @@ setup_runtime_venv() {
 get_enabled_plugins() {
     local plugins_conf="$OPENPLC_DIR/plugins.conf"
     local enabled_plugins=()
-    
+
     if [ ! -f "$plugins_conf" ]; then
         log_warning "plugins.conf not found: $plugins_conf"
         return 0
     fi
-    
+
     while IFS= read -r line; do
         # Skip empty lines and comments
         [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-        
+
         # Parse the line: name,path,enabled,type,config_path,venv_path
         IFS=',' read -ra FIELDS <<< "$line"
         local plugin_name="${FIELDS[0]}"
         local enabled="${FIELDS[2]}"
-        
+
         # Check if plugin is enabled (1)
         if [[ "$enabled" == "1" ]]; then
             enabled_plugins+=("$plugin_name")
         fi
     done < "$plugins_conf"
-    
+
     printf '%s\n' "${enabled_plugins[@]}"
 }
 
@@ -135,28 +155,28 @@ setup_plugin_venvs() {
         plugins_with_requirements+=("$plugin_name")
         log_info "Found plugin with requirements: $plugin_name"
     done < <(find "$plugins_dir" -name "requirements.txt" -type f -print0)
-    
+
     # If no plugins found, return
     if [ ${#plugins_with_requirements[@]} -eq 0 ]; then
         log_info "No plugins with requirements.txt found"
         return 0
     fi
-    
+
     log_info "Found ${#plugins_with_requirements[@]} plugin(s) that need virtual environments"
-    
+
     # Create virtual environments for each plugin
     for plugin_name in "${plugins_with_requirements[@]}"; do
         local venv_path="$OPENPLC_DIR/venvs/$plugin_name"
         local requirements_file="$plugins_dir/$plugin_name/requirements.txt"
-        
+
         if [ -d "$venv_path" ]; then
             log_info "Virtual environment already exists for $plugin_name"
-            
+
             # Check if requirements.txt is newer than the venv (dependencies may have changed)
             if [ "$requirements_file" -nt "$venv_path" ]; then
                 log_warning "Requirements file is newer than venv for $plugin_name"
                 log_info "Updating dependencies for $plugin_name..."
-                
+
                 if bash "$manage_script" install "$plugin_name"; then
                     log_success "Dependencies updated for $plugin_name"
                 else
@@ -168,7 +188,7 @@ setup_plugin_venvs() {
             fi
         else
             log_info "Creating virtual environment for plugin: $plugin_name"
-            
+
             if bash "$manage_script" create "$plugin_name"; then
                 log_success "Virtual environment created for $plugin_name"
             else
@@ -177,7 +197,7 @@ setup_plugin_venvs() {
             fi
         fi
     done
-    
+
     log_success "All plugin virtual environments are ready"
     return 0
 }

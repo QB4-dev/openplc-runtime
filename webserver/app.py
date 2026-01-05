@@ -1,5 +1,7 @@
+import errno
 import json
 import os
+import platform
 import shutil
 import ssl
 import threading
@@ -257,6 +259,24 @@ def run_https():
         except Exception:
             # logger.error("Error creating database tables: %s", e)
             pass
+
+    # On non-Linux platforms (MSYS2/Cygwin), patch Python SSL recv socket
+    # to handle EAGAIN/EWOULDBLOCK errors that cause "Resource temporarily unavailable"
+    is_linux = platform.system() == "Linux"
+    if not is_linux:
+        print(f"Non-Linux platform detected ({platform.system()}). Patching recv socket...")
+        _orig_recv = ssl.SSLSocket.recv
+
+        def _patched_recv(self, buflen, flags=0):
+            try:
+                return _orig_recv(self, buflen, flags)
+            except BlockingIOError as e:
+                # Only swallow EAGAIN / EWOULDBLOCK (errno 11) - re-raise other errors
+                if getattr(e, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK, 11):
+                    return b""
+                raise
+
+        ssl.SSLSocket.recv = _patched_recv
 
     try:
         cert_gen = CertGen(hostname=HOSTNAME, ip_addresses=["127.0.0.1"])

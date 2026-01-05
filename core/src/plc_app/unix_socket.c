@@ -215,7 +215,7 @@ void close_unix_socket(int server_fd)
     }
 }
 
-int setup_unix_socket()
+int setup_unix_socket(void)
 {
     int server_fd;
     struct sockaddr_un address;

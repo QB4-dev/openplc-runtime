@@ -53,9 +53,15 @@ void *plc_cycle_thread(void *arg)
         scan_cycle_time_start();
         plugin_mutex_take(&plugin_driver->buffer_mutex);
 
+        // Call cycle_start for all active native plugins that registered the hook
+        plugin_driver_cycle_start(plugin_driver);
+
         // Execute the PLC cycle
         ext_config_run__(tick__++);
         ext_updateTime();
+
+        // Call cycle_end for all active native plugins that registered the hook
+        plugin_driver_cycle_end(plugin_driver);
 
         // Update Watchdog Heartbeat
         atomic_store(&plc_heartbeat, time(NULL));
@@ -126,7 +132,6 @@ int load_plc_program(PluginManager *pm)
 
             return -1;
         }
-  
 
         return 0;
     }

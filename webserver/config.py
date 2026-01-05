@@ -1,18 +1,99 @@
 import os
+import platform
 import re
 import secrets
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from webserver.logger import get_logger, LogParser
+
+from webserver.logger import get_logger
 
 logger, buffer = get_logger("logger", use_buffer=True)
 
-# Use /var/run/runtime for persistent data to avoid Docker volume permission issues
-# This directory is created in the Dockerfile and can use a named volume
-ENV_PATH = Path("/var/run/runtime/.env")
-DB_PATH = Path("/var/run/runtime/restapi.db")
+
+def is_running_in_container():
+    """
+    Detect if running inside a container (Docker, Podman, etc.).
+    Returns True if running in a container, False otherwise.
+    """
+    # Check for /.dockerenv file (Docker-specific)
+    if os.path.exists("/.dockerenv"):
+        return True
+
+    # Check for container environment variables
+    if os.environ.get("container") or os.environ.get("DOCKER_CONTAINER"):
+        return True
+
+    # Check cgroup for container indicators
+    try:
+        with open("/proc/1/cgroup", "r", encoding="utf-8") as f:
+            cgroup_content = f.read()
+            if "docker" in cgroup_content or "kubepods" in cgroup_content:
+                return True
+            # Also check for containerd/cri-o patterns
+            if "/lxc/" in cgroup_content or "containerd" in cgroup_content:
+                return True
+    except (FileNotFoundError, PermissionError):
+        pass
+
+    # Check for container runtime in /proc/1/environ
+    try:
+        with open("/proc/1/environ", "rb") as f:
+            environ_content = f.read().decode("utf-8", errors="ignore")
+            if "container=" in environ_content:
+                return True
+    except (FileNotFoundError, PermissionError):
+        pass
+
+    return False
+
+
+def get_runtime_dir():
+    """
+    Get the runtime directory path based on the platform.
+    On MSYS2/Cygwin, use /run/runtime (which maps to a Windows path).
+    On Linux in containers, use /var/run/runtime for Docker volume compatibility.
+    On native Linux, use /var/run/runtime for ephemeral data (sockets).
+    """
+    if platform.system() != "Linux":
+        runtime_dir = Path("/run/runtime")
+    else:
+        runtime_dir = Path("/var/run/runtime")
+
+    # Ensure the directory exists
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    return runtime_dir
+
+
+def get_persistent_data_dir():
+    """
+    Get the directory for persistent data (database, .env file).
+    On containers (Docker), use /var/run/runtime (mounted as persistent volume).
+    On native Linux, use /var/lib/openplc-runtime (survives reboot).
+    On MSYS2/Windows, use /run/runtime.
+    """
+    if platform.system() != "Linux":
+        # MSYS2/Windows: use /run/runtime
+        data_dir = Path("/run/runtime")
+    elif is_running_in_container():
+        # Container: use /var/run/runtime (expected to be a mounted volume)
+        data_dir = Path("/var/run/runtime")
+    else:
+        # Native Linux: use persistent directory that survives reboot
+        data_dir = Path("/var/lib/openplc-runtime")
+
+    # Ensure the directory exists with appropriate permissions
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+
+RUNTIME_DIR = get_runtime_dir()
+PERSISTENT_DATA_DIR = get_persistent_data_dir()
+ENV_PATH = PERSISTENT_DATA_DIR / ".env"
+DB_PATH = PERSISTENT_DATA_DIR / "restapi.db"
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
 
 # Function to validate environment variable values
 def is_valid_env(var_name, value):
@@ -29,7 +110,7 @@ def generate_env_file():
     pepper = secrets.token_hex(32)
     uri = f"sqlite:///{DB_PATH}"
 
-    with open(ENV_PATH, "w") as f:
+    with open(ENV_PATH, "w", encoding="utf-8") as f:
         f.write("FLASK_ENV=development\n")
         f.write(f"SQLALCHEMY_DATABASE_URI={uri}\n")
         f.write(f"JWT_SECRET_KEY={jwt}\n")
@@ -62,9 +143,7 @@ except RuntimeError as e:
     logger.error("%s", e)
     # Need to regenerate .env file and remove the database as well
     response = (
-        input(
-            "Do you want to regenerate the .env file? This will delete your database. [y/N]: "
-        )
+        input("Do you want to regenerate the .env file? This will delete your database. [y/N]: ")
         .strip()
         .lower()
     )
@@ -74,21 +153,21 @@ except RuntimeError as e:
         load_dotenv(ENV_PATH)
     else:
         print("Exiting due to invalid environment configuration.")
-        exit(1)
+        sys.exit(1)
 
 
-class Config:
+class Config:  # pylint: disable=too-few-public-methods
     SQLALCHEMY_DATABASE_URI = os.environ["SQLALCHEMY_DATABASE_URI"]
     JWT_SECRET_KEY = os.environ["JWT_SECRET_KEY"]
     PEPPER = os.environ["PEPPER"]
 
 
-class DevConfig(Config):
+class DevConfig(Config):  # pylint: disable=too-few-public-methods
     SQLALCHEMY_TRACK_MODIFICATIONS = False  # keep performance parity with prod
     DEBUG = True
 
 
-class ProdConfig(Config):
+class ProdConfig(Config):  # pylint: disable=too-few-public-methods
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     DEBUG = False
     ENV = "production"

@@ -1,12 +1,10 @@
 #ifndef WATCHDOG_H
 #define WATCHDOG_H
 
-
 /**
  * @brief Initialize the watchdog
  * @return int 0 on success, -1 on failure
  */
-int watchdog_init();
-
+int watchdog_init(void);
 
 #endif // WATCHDOG_H

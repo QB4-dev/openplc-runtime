@@ -1,9 +1,25 @@
 #!/bin/bash
 set -e
 
-# Check for root privileges
-check_root() 
+# Detect if running on MSYS2/MinGW/Cygwin (Windows)
+is_msys2() {
+    case "$(uname -s)" in
+        MSYS*|MINGW*|CYGWIN*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Check for root privileges (skip on MSYS2/Windows)
+check_root()
 {
+    if is_msys2; then
+        # Root is not required/meaningful on MSYS2
+        return 0
+    fi
     if [[ $EUID -ne 0 ]]; then
         echo "ERROR: This script must be run as root" >&2
         echo "Example: sudo ./install.sh" >&2
@@ -11,7 +27,7 @@ check_root()
     fi
 }
 
-# Make sure we are root before proceeding
+# Make sure we are root before proceeding (unless on MSYS2)
 check_root
 
 # Detect the project root directory
@@ -45,6 +61,79 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Check if systemd is available and functional
+# Returns 0 if systemd is available, 1 otherwise
+has_systemd_support() {
+    # Skip on MSYS2/Windows
+    if is_msys2; then
+        return 1
+    fi
+
+    # Check if systemctl command exists
+    if ! command -v systemctl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # Check if systemd is running as PID 1
+    # This handles Docker containers and GitHub Actions where systemctl may exist but systemd isn't PID 1
+    if [ ! -d "/run/systemd/system" ]; then
+        return 1
+    fi
+
+    # Additional check: verify PID 1 is actually systemd
+    if [ -f "/proc/1/comm" ]; then
+        local pid1_name
+        pid1_name=$(cat /proc/1/comm 2>/dev/null)
+        if [ "$pid1_name" != "systemd" ]; then
+            return 1
+        fi
+    fi
+
+    # Final check: can we actually communicate with systemd?
+    # Use 'if' to prevent set -e from aborting on failure
+    if ! systemctl show-environment >/dev/null 2>&1; then
+        return 1
+    fi
+
+    return 0
+}
+
+# Install systemd service for OpenPLC Runtime
+install_systemd_service() {
+    local service_file="/etc/systemd/system/openplc-runtime.service"
+
+    log_info "Installing OpenPLC Runtime systemd service..."
+
+    # Create the service file
+    cat > "$service_file" <<EOF
+[Unit]
+Description=OpenPLC Runtime v4 Service
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=root
+Group=root
+WorkingDirectory=$OPENPLC_DIR
+ExecStart=$OPENPLC_DIR/start_openplc.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Reload systemd daemon to recognize the new service
+    systemctl daemon-reload
+
+    # Enable and start the service
+    log_info "Enabling and starting OpenPLC Runtime service..."
+    systemctl enable --now openplc-runtime.service
+
+    log_success "OpenPLC Runtime service installed and started"
+    return 0
+}
+
 # Ensure we're in the project directory
 cd "$OPENPLC_DIR"
 
@@ -52,8 +141,15 @@ echo "OpenPLC Runtime Installation"
 echo "Project directory: $OPENPLC_DIR"
 echo "Working directory: $(pwd)"
 
-install_dependencies() 
+install_dependencies()
 {
+    # Check for MSYS2 first (before trying to source /etc/os-release)
+    if is_msys2; then
+        echo "Platform: MSYS2/Windows"
+        install_deps_msys2
+        return $?
+    fi
+
     source /etc/os-release
     echo "Distro: $ID"
 
@@ -86,7 +182,7 @@ install_dependencies()
 }
 
 # For Ubuntu/Debian
-install_deps_apt() { 
+install_deps_apt() {
     apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential \
@@ -114,46 +210,65 @@ install_deps_dnf() {
         && dnf clean all
 }
 
+# For MSYS2 on Windows
+install_deps_msys2() {
+    echo "Installing dependencies via pacman..."
+    # Update package database (but don't do full system upgrade to avoid breaking frozen bundles)
+    pacman -Sy --noconfirm
+    # Install required packages
+    pacman -S --noconfirm --needed \
+        base-devel \
+        gcc \
+        make \
+        cmake \
+        pkg-config \
+        python \
+        python-pip \
+        python-setuptools \
+        git \
+        sqlite3
+}
+
 compile_plc() {
     echo "Preparing build directory..."
-    
+
     # Always clean build directory for Docker environment or when CMake cache exists
     # This prevents cross-contamination between Linux and Docker builds
     if [ -d "$OPENPLC_DIR/build" ] && [ -f "$OPENPLC_DIR/build/CMakeCache.txt" ]; then
         echo "Cleaning existing build directory to ensure clean build..."
         rm -rf "$OPENPLC_DIR/build"
     fi
-    
+
     # Create build directory
     if ! mkdir -p "$OPENPLC_DIR/build"; then
         echo "ERROR: Failed to create build directory" >&2
         return 1
     fi
-    
+
     cd "$OPENPLC_DIR/build" || {
         echo "ERROR: Failed to change to build directory" >&2
         return 1
     }
-    
+
     echo "Running cmake configuration..."
     if ! cmake ..; then
         echo "ERROR: CMake configuration failed" >&2
         cd "$OPENPLC_DIR"
         return 1
     fi
-    
+
     echo "Compiling with make (using $(nproc) cores)..."
     if ! make -j"$(nproc)"; then
         echo "ERROR: Compilation failed" >&2
         cd "$OPENPLC_DIR"
         return 1
     fi
-    
+
     cd "$OPENPLC_DIR" || {
         echo "ERROR: Failed to return to main directory" >&2
         return 1
     }
-    
+
     echo "SUCCESS: OpenPLC compiled successfully!"
     return 0
 }
@@ -187,28 +302,28 @@ setup_plugin_venvs() {
         plugins_with_requirements+=("$plugin_name")
         log_info "Found plugin with requirements: $plugin_name"
     done < <(find "$plugins_dir" -name "requirements.txt" -type f -print0)
-    
+
     # If no plugins found, return
     if [ ${#plugins_with_requirements[@]} -eq 0 ]; then
         log_info "No plugins with requirements.txt found"
         return 0
     fi
-    
+
     log_info "Found ${#plugins_with_requirements[@]} plugin(s) that need virtual environments"
-    
+
     # Create virtual environments for each plugin
     for plugin_name in "${plugins_with_requirements[@]}"; do
         local venv_path="$OPENPLC_DIR/venvs/$plugin_name"
         local requirements_file="$plugins_dir/$plugin_name/requirements.txt"
-        
+
         if [ -d "$venv_path" ]; then
             log_info "Virtual environment already exists for $plugin_name"
-            
+
             # Check if requirements.txt is newer than the venv (dependencies may have changed)
             if [ "$requirements_file" -nt "$venv_path" ]; then
                 log_warning "Requirements file is newer than venv for $plugin_name"
                 log_info "Updating dependencies for $plugin_name..."
-                
+
                 if bash "$manage_script" install "$plugin_name"; then
                     log_success "Dependencies updated for $plugin_name"
                 else
@@ -220,7 +335,7 @@ setup_plugin_venvs() {
             fi
         else
             log_info "Creating virtual environment for plugin: $plugin_name"
-            
+
             if bash "$manage_script" create "$plugin_name"; then
                 log_success "Virtual environment created for $plugin_name"
             else
@@ -229,14 +344,29 @@ setup_plugin_venvs() {
             fi
         fi
     done
-    
+
     log_success "All plugin virtual environments are ready"
     return 0
 }
 
 # Setup runtime directory (needed for both Linux and Docker)
-mkdir -p /var/run/runtime
-chmod 775 /var/run/runtime 2>/dev/null || true  # Ignore permission errors in Docker
+# On MSYS2, use /run/runtime which maps to the MSYS2 installation directory
+if is_msys2; then
+    mkdir -p /run/runtime 2>/dev/null || true
+    chmod 775 /run/runtime 2>/dev/null || true
+else
+    mkdir -p /var/run/runtime
+    chmod 775 /var/run/runtime 2>/dev/null || true  # Ignore permission errors in Docker
+
+    # Create persistent data directory for native Linux installs
+    # This directory stores .env and database files that must survive reboot
+    # In Docker, /var/run/runtime is mounted as a persistent volume instead
+    if has_systemd_support; then
+        mkdir -p /var/lib/openplc-runtime
+        chmod 755 /var/lib/openplc-runtime
+        log_info "Created persistent data directory at /var/lib/openplc-runtime"
+    fi
+fi
 
 # Make scripts executable
 chmod +x "$OPENPLC_DIR/install.sh" 2>/dev/null || true
@@ -257,14 +387,42 @@ setup_plugin_venvs
 echo "Compiling OpenPLC..."
 if compile_plc; then
     echo "Build process completed successfully!"
-    echo "OpenPLC Runtime v4 is ready to use."
-    echo ""
-    echo "To start the OpenPLC Runtime v4, run:"
-    echo "sudo ./start_openplc.sh"
 
-    # Create installation marker
+    # Create installation marker (must be done before starting the service)
     touch "$OPENPLC_DIR/.installed"
     echo "Installation completed at $(date)" > "$OPENPLC_DIR/.installed"
+
+    # Check if systemd is available and install the service
+    SYSTEMD_SERVICE_INSTALLED=0
+    if has_systemd_support; then
+        log_info "Systemd detected. Installing OpenPLC Runtime service..."
+        if install_systemd_service; then
+            SYSTEMD_SERVICE_INSTALLED=1
+        else
+            log_warning "Failed to install systemd service. You can start the runtime manually."
+        fi
+    else
+        log_info "Systemd not available. Skipping service installation."
+    fi
+
+    echo ""
+    echo "OpenPLC Runtime v4 is ready to use."
+    echo ""
+
+    if [ "$SYSTEMD_SERVICE_INSTALLED" -eq 1 ]; then
+        echo "The OpenPLC Runtime service has been installed and started."
+        echo "The runtime will automatically start on system boot."
+        echo ""
+        echo "Useful commands:"
+        echo "  sudo systemctl status openplc-runtime   - Check service status"
+        echo "  sudo systemctl stop openplc-runtime     - Stop the service"
+        echo "  sudo systemctl start openplc-runtime    - Start the service"
+        echo "  sudo systemctl restart openplc-runtime  - Restart the service"
+        echo "  sudo journalctl -u openplc-runtime -f   - View service logs"
+    else
+        echo "To start the OpenPLC Runtime v4, run:"
+        echo "sudo ./start_openplc.sh"
+    fi
 
 else
     echo "ERROR: Build process failed!" >&2

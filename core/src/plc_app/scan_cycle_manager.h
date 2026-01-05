@@ -22,8 +22,8 @@ typedef struct
     int64_t overruns;
 } plc_timing_stats_t;
 
-void scan_cycle_time_start();
-void scan_cycle_time_end();
+void scan_cycle_time_start(void);
+void scan_cycle_time_end(void);
 
 // Thread-safe function to get a snapshot of timing stats
 // Returns true if stats are valid (scan_count > 0), false otherwise
