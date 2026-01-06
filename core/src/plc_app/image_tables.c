@@ -82,7 +82,7 @@ int symbols_init(PluginManager *pm)
 
     // Try to load v4 version with bool_memory support (optional - only present in v4 programs)
     *(void **)(&ext_setBufferPointers_v4) =
-        plugin_manager_get_func(pm, void (*)(void), "setBufferPointers_v4");
+        plugin_manager_get_func(pm, void (*)(unsigned long), "setBufferPointers_v4");
 
     *(void **)(&ext_common_ticktime__) =
         plugin_manager_get_func(pm, void (*)(unsigned long), "common_ticktime__");
