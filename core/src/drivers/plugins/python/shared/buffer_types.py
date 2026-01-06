@@ -148,37 +148,35 @@ class BufferTypes:
     def __init__(self):
         # Core buffer types
         self._types = {
-            'bool': BoolBufferType(),
-            'byte': ByteBufferType(),
-            'int': IntBufferType(),
-            'dint': DintBufferType(),
-            'lint': LintBufferType(),
+            "bool": BoolBufferType(),
+            "byte": ByteBufferType(),
+            "int": IntBufferType(),
+            "dint": DintBufferType(),
+            "lint": LintBufferType(),
         }
 
         # Buffer type mappings (used by the facade to map method names to types)
         self._buffer_mappings = {
             # Boolean buffers
-            'bool_input': ('bool', 'input'),
-            'bool_output': ('bool', 'output'),
-
+            "bool_input": ("bool", "input"),
+            "bool_output": ("bool", "output"),
             # Byte buffers
-            'byte_input': ('byte', 'input'),
-            'byte_output': ('byte', 'output'),
-
+            "byte_input": ("byte", "input"),
+            "byte_output": ("byte", "output"),
             # Integer buffers (16-bit)
-            'int_input': ('int', 'input'),
-            'int_output': ('int', 'output'),
-            'int_memory': ('int', 'memory'),
-
+            "int_input": ("int", "input"),
+            "int_output": ("int", "output"),
+            "int_memory": ("int", "memory"),
             # Double integer buffers (32-bit)
-            'dint_input': ('dint', 'input'),
-            'dint_output': ('dint', 'output'),
-            'dint_memory': ('dint', 'memory'),
-
+            "dint_input": ("dint", "input"),
+            "dint_output": ("dint", "output"),
+            "dint_memory": ("dint", "memory"),
             # Long integer buffers (64-bit)
-            'lint_input': ('lint', 'input'),
-            'lint_output': ('lint', 'output'),
-            'lint_memory': ('lint', 'memory'),
+            "lint_input": ("lint", "input"),
+            "lint_output": ("lint", "output"),
+            "lint_memory": ("lint", "memory"),
+            # Boolean memory buffer
+            "bool_memory": ("bool", "memory"),
         }
 
     def get_type(self, type_name: str) -> IBufferType:
@@ -222,7 +220,8 @@ class BufferTypes:
 
 
 # Singleton instance
-_buffer_types_instance = None
+_buffer_types_instance = None  # pylint: disable=C0103
+
 
 def get_buffer_types() -> BufferTypes:
     """Get the singleton BufferTypes instance"""

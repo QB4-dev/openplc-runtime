@@ -31,6 +31,7 @@ IEC_ULINT *lint_output[BUFFER_SIZE];
 IEC_UINT *int_memory[BUFFER_SIZE];
 IEC_UDINT *dint_memory[BUFFER_SIZE];
 IEC_ULINT *lint_memory[BUFFER_SIZE];
+IEC_BOOL *bool_memory[BUFFER_SIZE][8];
 
 void (*ext_config_run__)(unsigned long tick);
 void (*ext_config_init__)(void);
@@ -44,6 +45,16 @@ void (*ext_setBufferPointers)(
     IEC_ULINT *input_lint[BUFFER_SIZE], IEC_ULINT *output_lint[BUFFER_SIZE],
     IEC_UINT *int_memory[BUFFER_SIZE], IEC_UDINT *dint_memory[BUFFER_SIZE],
     IEC_ULINT *lint_memory[BUFFER_SIZE]);
+
+// v4 version with bool_memory support for %MX locations
+void (*ext_setBufferPointers_v4)(
+    IEC_BOOL *input_bool[BUFFER_SIZE][8], IEC_BOOL *output_bool[BUFFER_SIZE][8],
+    IEC_BYTE *input_byte[BUFFER_SIZE], IEC_BYTE *output_byte[BUFFER_SIZE],
+    IEC_UINT *input_int[BUFFER_SIZE], IEC_UINT *output_int[BUFFER_SIZE],
+    IEC_UDINT *input_dint[BUFFER_SIZE], IEC_UDINT *output_dint[BUFFER_SIZE],
+    IEC_ULINT *input_lint[BUFFER_SIZE], IEC_ULINT *output_lint[BUFFER_SIZE],
+    IEC_UINT *int_memory[BUFFER_SIZE], IEC_UDINT *dint_memory[BUFFER_SIZE],
+    IEC_ULINT *lint_memory[BUFFER_SIZE], IEC_BOOL *memory_bool[BUFFER_SIZE][8]);
 
 // Debug
 void (*ext_set_endianness)(uint8_t value);
@@ -68,6 +79,10 @@ int symbols_init(PluginManager *pm)
 
     *(void **)(&ext_setBufferPointers) =
         plugin_manager_get_func(pm, void (*)(unsigned long), "setBufferPointers");
+
+    // Try to load v4 version with bool_memory support (optional - only present in v4 programs)
+    *(void **)(&ext_setBufferPointers_v4) =
+        plugin_manager_get_func(pm, void (*)(unsigned long), "setBufferPointers_v4");
 
     *(void **)(&ext_common_ticktime__) =
         plugin_manager_get_func(pm, void (*)(unsigned long), "common_ticktime__");
@@ -99,9 +114,21 @@ int symbols_init(PluginManager *pm)
     }
 
     // Send buffer pointers to .so
-    ext_setBufferPointers(bool_input, bool_output, byte_input, byte_output, int_input, int_output,
-                          dint_input, dint_output, lint_input, lint_output, int_memory, dint_memory,
-                          lint_memory);
+    // Try v4 version first (with bool_memory support for %MX), fall back to v1 for older programs
+    if (ext_setBufferPointers_v4)
+    {
+        log_info("Using setBufferPointers_v4 with bool_memory support");
+        ext_setBufferPointers_v4(bool_input, bool_output, byte_input, byte_output, int_input,
+                                 int_output, dint_input, dint_output, lint_input, lint_output,
+                                 int_memory, dint_memory, lint_memory, bool_memory);
+    }
+    else
+    {
+        log_info("Using setBufferPointers (legacy, no bool_memory support)");
+        ext_setBufferPointers(bool_input, bool_output, byte_input, byte_output, int_input,
+                              int_output, dint_input, dint_output, lint_input, lint_output,
+                              int_memory, dint_memory, lint_memory);
+    }
 
     // Initialize Python loader logging callbacks (optional - only present if Python FBs are used)
     void (*ext_python_loader_set_loggers)(void (*)(const char *, ...), void (*)(const char *, ...));
@@ -131,6 +158,7 @@ static IEC_ULINT temp_lint_output[BUFFER_SIZE];
 static IEC_UINT temp_int_memory[BUFFER_SIZE];
 static IEC_UDINT temp_dint_memory[BUFFER_SIZE];
 static IEC_ULINT temp_lint_memory[BUFFER_SIZE];
+static IEC_BOOL temp_bool_memory[BUFFER_SIZE][8];
 
 void image_tables_fill_null_pointers(void)
 {
@@ -285,6 +313,20 @@ void image_tables_fill_null_pointers(void)
         }
     }
 
+    // Fill bool memory pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        for (int b = 0; b < 8; b++)
+        {
+            if (bool_memory[i][b] == NULL)
+            {
+                temp_bool_memory[i][b] = 0;
+                bool_memory[i][b]      = &temp_bool_memory[i][b];
+                filled_count++;
+            }
+        }
+    }
+
     log_info("Filled %d NULL pointers in image tables with temporary buffers", filled_count);
 }
 
@@ -375,6 +417,15 @@ void image_tables_clear_null_pointers(void)
     for (int i = 0; i < BUFFER_SIZE; i++)
     {
         lint_memory[i] = NULL;
+    }
+
+    // Clear bool memory pointers
+    for (int i = 0; i < BUFFER_SIZE; i++)
+    {
+        for (int b = 0; b < 8; b++)
+        {
+            bool_memory[i][b] = NULL;
+        }
     }
 
     log_info("Cleared all pointers in image tables");

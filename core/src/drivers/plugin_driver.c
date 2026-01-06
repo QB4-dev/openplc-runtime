@@ -37,6 +37,7 @@ extern IEC_ULINT *lint_output[BUFFER_SIZE];
 extern IEC_UINT *int_memory[BUFFER_SIZE];
 extern IEC_UDINT *dint_memory[BUFFER_SIZE];
 extern IEC_ULINT *lint_memory[BUFFER_SIZE];
+extern IEC_BOOL *bool_memory[BUFFER_SIZE][8];
 static PyThreadState *main_tstate = NULL;
 static PyGILState_STATE gstate;
 static int has_python_plugin = 0;
@@ -643,6 +644,7 @@ void *generate_structured_args_with_driver(plugin_type_t type, plugin_driver_t *
     args->int_memory  = int_memory;
     args->dint_memory = dint_memory;
     args->lint_memory = lint_memory;
+    args->bool_memory = bool_memory;
 
     // Initialize mutex functions
     args->mutex_take = plugin_mutex_take;

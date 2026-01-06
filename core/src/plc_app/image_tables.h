@@ -32,6 +32,7 @@ extern IEC_ULINT *lint_output[BUFFER_SIZE];
 extern IEC_UINT *int_memory[BUFFER_SIZE];
 extern IEC_UDINT *dint_memory[BUFFER_SIZE];
 extern IEC_ULINT *lint_memory[BUFFER_SIZE];
+extern IEC_BOOL *bool_memory[BUFFER_SIZE][8];
 
 /**
  * @brief Set the buffer pointers for the plugin manager
@@ -46,6 +47,21 @@ extern void (*ext_setBufferPointers)(
     IEC_ULINT *input_lint[BUFFER_SIZE], IEC_ULINT *output_lint[BUFFER_SIZE],
     IEC_UINT *int_memory[BUFFER_SIZE], IEC_UDINT *dint_memory[BUFFER_SIZE],
     IEC_ULINT *lint_memory[BUFFER_SIZE]);
+
+/**
+ * @brief Set the buffer pointers for the plugin manager (v4 with bool_memory)
+ *
+ * This version includes bool_memory support for %MX locations.
+ * Only present in programs compiled with -DOPENPLC_V4.
+ */
+extern void (*ext_setBufferPointers_v4)(
+    IEC_BOOL *input_bool[BUFFER_SIZE][8], IEC_BOOL *output_bool[BUFFER_SIZE][8],
+    IEC_BYTE *input_byte[BUFFER_SIZE], IEC_BYTE *output_byte[BUFFER_SIZE],
+    IEC_UINT *input_int[BUFFER_SIZE], IEC_UINT *output_int[BUFFER_SIZE],
+    IEC_UDINT *input_dint[BUFFER_SIZE], IEC_UDINT *output_dint[BUFFER_SIZE],
+    IEC_ULINT *input_lint[BUFFER_SIZE], IEC_ULINT *output_lint[BUFFER_SIZE],
+    IEC_UINT *int_memory[BUFFER_SIZE], IEC_UDINT *dint_memory[BUFFER_SIZE],
+    IEC_ULINT *lint_memory[BUFFER_SIZE], IEC_BOOL *memory_bool[BUFFER_SIZE][8]);
 
 /**
  * @brief Common ticktime variable from the PLC program

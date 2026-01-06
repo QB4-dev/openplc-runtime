@@ -54,7 +54,7 @@ gcc $FLAGS -I "$LIB_PATH" -I "$PYTHON_INCLUDE_PATH" -include iec_python.h -c "$S
 echo "[INFO] Compiling debug.c..."
 gcc $FLAGS -I "$LIB_PATH" -c "$SRC_PATH/debug.c" -o "$BUILD_PATH/debug.o"
 echo "[INFO] Compiling glueVars.c..."
-gcc $FLAGS -I "$LIB_PATH" -c "$SRC_PATH/glueVars.c" -o "$BUILD_PATH/glueVars.o"
+gcc $FLAGS -I "$LIB_PATH" -DOPENPLC_V4 -c "$SRC_PATH/glueVars.c" -o "$BUILD_PATH/glueVars.o"
 echo "[INFO] Compiling c_blocks_code.cpp..."
 g++ $FLAGS -I "$LIB_PATH" -c "$SRC_PATH/c_blocks_code.cpp" -o "$BUILD_PATH/c_blocks_code.o"
 echo "[INFO] Compiling python_loader.c..."

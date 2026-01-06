@@ -7,10 +7,10 @@ the plugin_runtime_args_t structure from plugin_driver.h.
 """
 
 import ctypes
-from ctypes import *
 
 # Import IEC type definitions
-from .iec_types import IEC_BOOL, IEC_BYTE, IEC_UINT, IEC_UDINT, IEC_ULINT
+from .iec_types import IEC_BOOL, IEC_BYTE, IEC_UDINT, IEC_UINT, IEC_ULINT
+
 
 class PluginRuntimeArgs(ctypes.Structure):
     """
@@ -19,6 +19,7 @@ class PluginRuntimeArgs(ctypes.Structure):
     CRITICAL: This structure must match the C definition exactly to prevent
     segmentation faults and memory corruption.
     """
+
     _fields_ = [
         # Buffer arrays - these are pointers to arrays of pointers
         # C: IEC_BOOL *(*bool_input)[8] means pointer to array of 8 pointers
@@ -35,17 +36,15 @@ class PluginRuntimeArgs(ctypes.Structure):
         ("int_memory", ctypes.POINTER(ctypes.POINTER(IEC_UINT))),
         ("dint_memory", ctypes.POINTER(ctypes.POINTER(IEC_UDINT))),
         ("lint_memory", ctypes.POINTER(ctypes.POINTER(IEC_ULINT))),
-
+        ("bool_memory", ctypes.POINTER(ctypes.POINTER(IEC_BOOL) * 8)),
         # Mutex function pointers
         ("mutex_take", ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)),
         ("mutex_give", ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)),
         ("buffer_mutex", ctypes.c_void_p),
         ("plugin_specific_config_file_path", ctypes.c_char * 256),
-
         # Buffer size information
         ("buffer_size", ctypes.c_int),
         ("bits_per_buffer", ctypes.c_int),
-
         # Logging function pointers
         ("log_info", ctypes.CFUNCTYPE(None, ctypes.c_char_p)),
         ("log_debug", ctypes.CFUNCTYPE(None, ctypes.c_char_p)),
@@ -111,23 +110,29 @@ class PluginRuntimeArgs(ctypes.Structure):
     def __str__(self):
         """Debug representation of the structure"""
         try:
-            return (f"PluginRuntimeArgs(\n"
-                    f"  bool_input=0x{ctypes.addressof(self.bool_input.contents) if self.bool_input else 0:x},\n"
-                    f"  bool_output=0x{ctypes.addressof(self.bool_output.contents) if self.bool_output else 0:x},\n"
-                    f"  byte_input=0x{ctypes.addressof(self.byte_input.contents) if self.byte_input else 0:x},\n"
-                    f"  byte_output=0x{ctypes.addressof(self.byte_output.contents) if self.byte_output else 0:x},\n"
-                    f"  int_input=0x{ctypes.addressof(self.int_input.contents) if self.int_input else 0:x},\n"
-                    f"  int_output=0x{ctypes.addressof(self.int_output.contents) if self.int_output else 0:x},\n"
-                    f"  dint_input=0x{ctypes.addressof(self.dint_input.contents) if self.dint_input else 0:x},\n"
-                    f"  dint_output=0x{ctypes.addressof(self.dint_output.contents) if self.dint_output else 0:x},\n"
-                    f"  lint_input=0x{ctypes.addressof(self.lint_input.contents) if self.lint_input else 0:x},\n"
-                    f"  lint_output=0x{ctypes.addressof(self.lint_output.contents) if self.lint_output else 0:x},\n"
-                    f"  int_memory=0x{ctypes.addressof(self.int_memory.contents) if self.int_memory else 0:x},\n"
-                    f"  buffer_size={self.buffer_size},\n"
-                    f"  bits_per_buffer={self.bits_per_buffer},\n"
-                    f"  buffer_mutex=0x{self.buffer_mutex or 0:x},\n"
-                    f"  mutex_take={'valid' if self.mutex_take else 'NULL'},\n"
-                    f"  mutex_give={'valid' if self.mutex_give else 'NULL'}\n"
-                    f")")
-        except:
+
+            def addr(ptr):
+                return ctypes.addressof(ptr.contents) if ptr else 0
+
+            return (
+                f"PluginRuntimeArgs(\n"
+                f"  bool_input=0x{addr(self.bool_input):x},\n"
+                f"  bool_output=0x{addr(self.bool_output):x},\n"
+                f"  byte_input=0x{addr(self.byte_input):x},\n"
+                f"  byte_output=0x{addr(self.byte_output):x},\n"
+                f"  int_input=0x{addr(self.int_input):x},\n"
+                f"  int_output=0x{addr(self.int_output):x},\n"
+                f"  dint_input=0x{addr(self.dint_input):x},\n"
+                f"  dint_output=0x{addr(self.dint_output):x},\n"
+                f"  lint_input=0x{addr(self.lint_input):x},\n"
+                f"  lint_output=0x{addr(self.lint_output):x},\n"
+                f"  int_memory=0x{addr(self.int_memory):x},\n"
+                f"  buffer_size={self.buffer_size},\n"
+                f"  bits_per_buffer={self.bits_per_buffer},\n"
+                f"  buffer_mutex=0x{self.buffer_mutex or 0:x},\n"
+                f"  mutex_take={'valid' if self.mutex_take else 'NULL'},\n"
+                f"  mutex_give={'valid' if self.mutex_give else 'NULL'}\n"
+                f")"
+            )
+        except Exception:
             return "PluginRuntimeArgs(corrupted or invalid)"

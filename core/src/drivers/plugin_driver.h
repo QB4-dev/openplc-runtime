@@ -57,6 +57,7 @@ typedef struct
     IEC_UINT **int_memory;
     IEC_UDINT **dint_memory;
     IEC_ULINT **lint_memory;
+    IEC_BOOL *(*bool_memory)[8];
 
     // Mutex functions
     int (*mutex_take)(pthread_mutex_t *mutex);
