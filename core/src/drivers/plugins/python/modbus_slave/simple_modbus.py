@@ -53,6 +53,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # Import the correct type definitions (must be after sys.path modification)
 from shared import (  # noqa: E402
+    PluginLogger,
     SafeBufferAccess,
     safe_extract_runtime_args_from_capsule,
 )
@@ -68,9 +69,11 @@ class OpenPLCCoilsDataBlock(ModbusSparseDataBlock):
         # Create safe buffer access wrapper
         self.safe_buffer_access = SafeBufferAccess(runtime_args)
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Warning: Failed to create safe buffer access for coils: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.warn(
+                    f"Failed to create safe buffer access for coils: "
+                    f"{self.safe_buffer_access.error_msg}"
+                )
 
         # Initialize with zeros
         super().__init__([0] * num_coils)
@@ -80,9 +83,10 @@ class OpenPLCCoilsDataBlock(ModbusSparseDataBlock):
         address = address - 1  # Modbus addresses are 0-based
 
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Error: Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.error(
+                    f"Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
+                )
             return [0] * count
 
         # Ensure thread-safe access
@@ -103,7 +107,8 @@ class OpenPLCCoilsDataBlock(ModbusSparseDataBlock):
                 if error_msg == "Success":
                     values.append(1 if value else 0)
                 else:
-                    print(f"[MODBUS] Error reading coil {coil_addr}: {error_msg}")
+                    if logger:
+                        logger.error(f"Error reading coil {coil_addr}: {error_msg}")
                     values.append(0)
             else:
                 values.append(0)
@@ -118,9 +123,10 @@ class OpenPLCCoilsDataBlock(ModbusSparseDataBlock):
         address = address - 1  # Modbus addresses are 0-based
 
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Error: Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.error(
+                    f"Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
+                )
             return
 
         # Ensure thread-safe access
@@ -138,7 +144,8 @@ class OpenPLCCoilsDataBlock(ModbusSparseDataBlock):
                     buffer_idx, bit_idx, bool(value), thread_safe=False
                 )
                 if error_msg != "Success":
-                    print(f"[MODBUS] Error setting coil {coil_addr}: {error_msg}")
+                    if logger:
+                        logger.error(f"Error setting coil {coil_addr}: {error_msg}")
 
         # Release mutex after access
         self.safe_buffer_access.release_mutex()
@@ -154,10 +161,11 @@ class OpenPLCDiscreteInputsDataBlock(ModbusSparseDataBlock):
         # Create safe buffer access wrapper
         self.safe_buffer_access = SafeBufferAccess(runtime_args)
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Warning: Failed to create safe buffer access for "
-                f"discrete inputs: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.warn(
+                    f"Failed to create safe buffer access for "
+                    f"discrete inputs: {self.safe_buffer_access.error_msg}"
+                )
 
         # Initialize with zeros
         super().__init__([0] * num_inputs)
@@ -167,9 +175,10 @@ class OpenPLCDiscreteInputsDataBlock(ModbusSparseDataBlock):
         address = address - 1  # Modbus addresses are 0-based
 
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Error: Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.error(
+                    f"Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
+                )
             return [0] * count
 
         # Ensure thread-safe access
@@ -190,7 +199,8 @@ class OpenPLCDiscreteInputsDataBlock(ModbusSparseDataBlock):
                 if error_msg == "Success":
                     values.append(1 if value else 0)
                 else:
-                    print(f"[MODBUS] Error reading discrete input {input_addr}: {error_msg}")
+                    if logger:
+                        logger.error(f"Error reading discrete input {input_addr}: {error_msg}")
                     values.append(0)
             else:
                 values.append(0)
@@ -215,10 +225,11 @@ class OpenPLCInputRegistersDataBlock(ModbusSparseDataBlock):
         # Create safe buffer access wrapper
         self.safe_buffer_access = SafeBufferAccess(runtime_args)
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Warning: Failed to create safe buffer access for "
-                f"input registers: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.warn(
+                    f"Failed to create safe buffer access for "
+                    f"input registers: {self.safe_buffer_access.error_msg}"
+                )
 
         # Initialize with zeros
         super().__init__([0] * num_registers)
@@ -228,9 +239,10 @@ class OpenPLCInputRegistersDataBlock(ModbusSparseDataBlock):
         address = address - 1  # Modbus addresses are 0-based
 
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Error: Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.error(
+                    f"Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
+                )
             return [0] * count
 
         # Ensure buffer mutex
@@ -247,7 +259,8 @@ class OpenPLCInputRegistersDataBlock(ModbusSparseDataBlock):
                 if error_msg == "Success":
                     values.append(value)
                 else:
-                    print(f"[MODBUS] Error reading input register {reg_addr}: {error_msg}")
+                    if logger:
+                        logger.error(f"Error reading input register {reg_addr}: {error_msg}")
                     values.append(0)
             else:
                 values.append(0)
@@ -272,10 +285,11 @@ class OpenPLCHoldingRegistersDataBlock(ModbusSparseDataBlock):
         # Create safe buffer access wrapper
         self.safe_buffer_access = SafeBufferAccess(runtime_args)
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Warning: Failed to create safe buffer access for "
-                f"holding registers: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.warn(
+                    f"Failed to create safe buffer access for "
+                    f"holding registers: {self.safe_buffer_access.error_msg}"
+                )
 
         # Initialize with zeros
         super().__init__([0] * num_registers)
@@ -285,9 +299,10 @@ class OpenPLCHoldingRegistersDataBlock(ModbusSparseDataBlock):
         address = address - 1  # Modbus addresses are 0-based
 
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Error: Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.error(
+                    f"Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
+                )
             return [0] * count
 
         # Ensure buffer mutex
@@ -304,7 +319,8 @@ class OpenPLCHoldingRegistersDataBlock(ModbusSparseDataBlock):
                 if error_msg == "Success":
                     values.append(value)
                 else:
-                    print(f"[MODBUS] Error reading holding register {reg_addr}: {error_msg}")
+                    if logger:
+                        logger.error(f"Error reading holding register {reg_addr}: {error_msg}")
                     values.append(0)
             else:
                 values.append(0)
@@ -318,9 +334,10 @@ class OpenPLCHoldingRegistersDataBlock(ModbusSparseDataBlock):
         address = address - 1  # Modbus addresses are 0-based
 
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Error: Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.error(
+                    f"Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
+                )
             return
 
         # Ensure buffer mutex
@@ -334,7 +351,8 @@ class OpenPLCHoldingRegistersDataBlock(ModbusSparseDataBlock):
                     reg_addr, value, thread_safe=False
                 )
                 if error_msg != "Success":
-                    print(f"[MODBUS] Error setting holding register {reg_addr}: {error_msg}")
+                    if logger:
+                        logger.error(f"Error setting holding register {reg_addr}: {error_msg}")
 
         # Release mutex after access
         self.safe_buffer_access.release_mutex()
@@ -358,16 +376,18 @@ class OpenPLCSegmentedCoilsDataBlock(ModbusSparseDataBlock):
         # Create safe buffer access wrapper
         self.safe_buffer_access = SafeBufferAccess(runtime_args)
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Warning: Failed to create safe buffer access for segmented coils: "
-                f"{self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.warn(
+                    f"Failed to create safe buffer access for segmented coils: "
+                    f"{self.safe_buffer_access.error_msg}"
+                )
 
         # Initialize with zeros
         super().__init__([0] * self.total_bits)
-        print(
-            f"[MODBUS] Segmented coils: %QX={qx_bits} bits, %MX={mx_bits} bits, total={self.total_bits}"
-        )
+        if logger:
+            logger.info(
+                f"Segmented coils: %QX={qx_bits} bits, %MX={mx_bits} bits, total={self.total_bits}"
+            )
 
     def _get_segment_info(self, coil_addr):
         """
@@ -397,9 +417,10 @@ class OpenPLCSegmentedCoilsDataBlock(ModbusSparseDataBlock):
         address = address - 1  # Modbus addresses are 1-based
 
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Error: Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.error(
+                    f"Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
+                )
             return [0] * count
 
         self.safe_buffer_access.acquire_mutex()
@@ -416,7 +437,8 @@ class OpenPLCSegmentedCoilsDataBlock(ModbusSparseDataBlock):
                     if error_msg == "Success":
                         values.append(1 if value else 0)
                     else:
-                        print(f"[MODBUS] Error reading coil %QX{coil_addr}: {error_msg}")
+                        if logger:
+                            logger.error(f"Error reading coil %QX{coil_addr}: {error_msg}")
                         values.append(0)
                 elif segment == "mx":
                     mx_addr = coil_addr - self.qx_bits
@@ -426,7 +448,8 @@ class OpenPLCSegmentedCoilsDataBlock(ModbusSparseDataBlock):
                     if error_msg == "Success":
                         values.append(1 if value else 0)
                     else:
-                        print(f"[MODBUS] Error reading coil %MX{mx_addr}: {error_msg}")
+                        if logger:
+                            logger.error(f"Error reading coil %MX{mx_addr}: {error_msg}")
                         values.append(0)
                 else:
                     values.append(0)
@@ -440,9 +463,10 @@ class OpenPLCSegmentedCoilsDataBlock(ModbusSparseDataBlock):
         address = address - 1  # Modbus addresses are 1-based
 
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Error: Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.error(
+                    f"Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
+                )
             return
 
         self.safe_buffer_access.acquire_mutex()
@@ -456,14 +480,16 @@ class OpenPLCSegmentedCoilsDataBlock(ModbusSparseDataBlock):
                         buffer_idx, bit_idx, bool(value), thread_safe=False
                     )
                     if error_msg != "Success":
-                        print(f"[MODBUS] Error setting coil %QX{coil_addr}: {error_msg}")
+                        if logger:
+                            logger.error(f"Error setting coil %QX{coil_addr}: {error_msg}")
                 elif segment == "mx":
                     mx_addr = coil_addr - self.qx_bits
                     _, error_msg = self.safe_buffer_access.write_bool_memory(
                         buffer_idx, bit_idx, bool(value), thread_safe=False
                     )
                     if error_msg != "Success":
-                        print(f"[MODBUS] Error setting coil %MX{mx_addr}: {error_msg}")
+                        if logger:
+                            logger.error(f"Error setting coil %MX{mx_addr}: {error_msg}")
         finally:
             self.safe_buffer_access.release_mutex()
 
@@ -513,18 +539,20 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
         # Create safe buffer access wrapper
         self.safe_buffer_access = SafeBufferAccess(runtime_args)
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Warning: Failed to create safe buffer access for segmented holding registers: "
-                f"{self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.warn(
+                    f"Failed to create safe buffer access for segmented holding registers: "
+                    f"{self.safe_buffer_access.error_msg}"
+                )
 
         # Initialize with zeros
         super().__init__([0] * self.total_registers)
-        print(
-            f"[MODBUS] Segmented holding registers: %QW=0-{self.qw_end - 1}, "
-            f"%MW={self.mw_start}-{self.mw_end - 1}, %MD={self.md_start}-{self.md_end - 1}, "
-            f"%ML={self.ml_start}-{self.ml_end - 1}, word_order={word_order}"
-        )
+        if logger:
+            logger.info(
+                f"Segmented holding registers: %QW=0-{self.qw_end - 1}, "
+                f"%MW={self.mw_start}-{self.mw_end - 1}, %MD={self.md_start}-{self.md_end - 1}, "
+                f"%ML={self.ml_start}-{self.ml_end - 1}, word_order={word_order}"
+            )
 
     def _get_segment_info(self, reg_addr):
         """
@@ -609,9 +637,10 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
         address = address - 1  # Modbus addresses are 1-based
 
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Error: Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.error(
+                    f"Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
+                )
             return [0] * count
 
         self.safe_buffer_access.acquire_mutex()
@@ -628,7 +657,8 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
                     if error_msg == "Success":
                         values.append(value & 0xFFFF)
                     else:
-                        print(f"[MODBUS] Error reading %QW{value_idx}: {error_msg}")
+                        if logger:
+                            logger.error(f"Error reading %QW{value_idx}: {error_msg}")
                         values.append(0)
 
                 elif segment == "mw":
@@ -638,7 +668,8 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
                     if error_msg == "Success":
                         values.append(value & 0xFFFF)
                     else:
-                        print(f"[MODBUS] Error reading %MW{value_idx}: {error_msg}")
+                        if logger:
+                            logger.error(f"Error reading %MW{value_idx}: {error_msg}")
                         values.append(0)
 
                 elif segment == "md":
@@ -649,7 +680,8 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
                         words = self._split_dint_to_words(dint_value)
                         values.append(words[word_offset])
                     else:
-                        print(f"[MODBUS] Error reading %MD{value_idx}: {error_msg}")
+                        if logger:
+                            logger.error(f"Error reading %MD{value_idx}: {error_msg}")
                         values.append(0)
 
                 elif segment == "ml":
@@ -660,7 +692,8 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
                         words = self._split_lint_to_words(lint_value)
                         values.append(words[word_offset])
                     else:
-                        print(f"[MODBUS] Error reading %ML{value_idx}: {error_msg}")
+                        if logger:
+                            logger.error(f"Error reading %ML{value_idx}: {error_msg}")
                         values.append(0)
 
                 else:
@@ -675,9 +708,10 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
         address = address - 1  # Modbus addresses are 1-based
 
         if not self.safe_buffer_access.is_valid:
-            print(
-                f"[MODBUS] Error: Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
-            )
+            if logger:
+                logger.error(
+                    f"Safe buffer access not valid: {self.safe_buffer_access.error_msg}"
+                )
             return
 
         self.safe_buffer_access.acquire_mutex()
@@ -696,14 +730,16 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
                         value_idx, value & 0xFFFF, thread_safe=False
                     )
                     if error_msg != "Success":
-                        print(f"[MODBUS] Error setting %QW{value_idx}: {error_msg}")
+                        if logger:
+                            logger.error(f"Error setting %QW{value_idx}: {error_msg}")
 
                 elif segment == "mw":
                     _, error_msg = self.safe_buffer_access.write_int_memory(
                         value_idx, value & 0xFFFF, thread_safe=False
                     )
                     if error_msg != "Success":
-                        print(f"[MODBUS] Error setting %MW{value_idx}: {error_msg}")
+                        if logger:
+                            logger.error(f"Error setting %MW{value_idx}: {error_msg}")
 
                 elif segment == "md":
                     # Collect words for this DINT
@@ -736,7 +772,8 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
                     value_idx, dint_value, thread_safe=False
                 )
                 if error_msg != "Success":
-                    print(f"[MODBUS] Error setting %MD{value_idx}: {error_msg}")
+                    if logger:
+                        logger.error(f"Error setting %MD{value_idx}: {error_msg}")
 
             # Write pending LINT values
             for value_idx, words in pending_lint.items():
@@ -745,7 +782,8 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
                     value_idx, lint_value, thread_safe=False
                 )
                 if error_msg != "Success":
-                    print(f"[MODBUS] Error setting %ML{value_idx}: {error_msg}")
+                    if logger:
+                        logger.error(f"Error setting %ML{value_idx}: {error_msg}")
         finally:
             self.safe_buffer_access.release_mutex()
 
@@ -844,6 +882,7 @@ server_task = None
 server_context = None
 runtime_args = None
 running = False
+logger: PluginLogger = None
 server_loop = None  # Reference to the server's event loop for cross-thread operations
 server_started_event = threading.Event()  # Signals successful server startup
 server_error = None  # Stores any startup error message
@@ -857,27 +896,31 @@ RETRY_DELAY_MAX = 30.0  # Maximum delay between restart attempts (seconds)
 
 def init(args_capsule):
     """Initialize the Modbus plugin"""
-    global runtime_args, server_context, gIp, gPort
+    global runtime_args, server_context, gIp, gPort, logger
 
-    print("[MODBUS] Python plugin 'simple_modbus' initializing...")
+    # Initialize logger early (without runtime_args for now)
+    logger = PluginLogger("MODBUS_SLAVE", None)
+    logger.info("Python plugin 'simple_modbus' initializing...")
 
     try:
         # Print structure validation info for debugging
-        print("[MODBUS] Validating plugin structure alignment...")
+        logger.debug("Validating plugin structure alignment...")
 
         # Extract runtime args from capsule using safe method
         if hasattr(args_capsule, "__class__") and "PyCapsule" in str(type(args_capsule)):
             # This is a PyCapsule from C - use safe extraction
             runtime_args, error_msg = safe_extract_runtime_args_from_capsule(args_capsule)
             if runtime_args is None:
-                print(f"[MODBUS] Failed to extract runtime args: {error_msg}")
+                logger.error(f"Failed to extract runtime args: {error_msg}")
                 return False
 
-            print("[MODBUS] Runtime arguments extracted successfully")
+            # Re-initialize logger with runtime_args for central logging
+            logger = PluginLogger("MODBUS_SLAVE", runtime_args)
+            logger.info("Runtime arguments extracted successfully")
         else:
             # This is a direct object (for testing)
             runtime_args = args_capsule
-            print("[MODBUS] Using direct runtime args for testing")
+            logger.info("Using direct runtime args for testing")
 
         # Try to load configuration from plugin_specific_config_file_path
         config_map = None
@@ -890,20 +933,21 @@ def init(args_capsule):
                 if network_config and "host" in network_config and "port" in network_config:
                     gIp = str(network_config["host"])
                     gPort = int(network_config["port"])
-                    print(f"[MODBUS] Configuration loaded - Host: {gIp}, Port: {gPort}")
+                    logger.info(f"Configuration loaded - Host: {gIp}, Port: {gPort}")
                 else:
-                    print(
-                        "[MODBUS] Config file loaded but network_configuration section missing or incomplete - using defaults"
+                    logger.warn(
+                        "Config file loaded but network_configuration section missing or "
+                        "incomplete - using defaults"
                     )
-                    print(f"[MODBUS] Available config sections: {list(config_map.keys())}")
+                    logger.debug(f"Available config sections: {list(config_map.keys())}")
 
                 # Parse buffer mapping configuration
                 buffer_config = parse_buffer_mapping_config(config_map)
-                print(f"[MODBUS] Buffer mapping format: {buffer_config['format']}")
+                logger.info(f"Buffer mapping format: {buffer_config['format']}")
             else:
-                print(f"[MODBUS] Failed to load configuration file: {status} - using defaults")
+                logger.warn(f"Failed to load configuration file: {status} - using defaults")
         except Exception as config_error:
-            print(f"[MODBUS] Exception while loading config: {config_error} - using defaults")
+            logger.warn(f"Exception while loading config: {config_error} - using defaults")
             import traceback
 
             traceback.print_exc()
@@ -911,12 +955,12 @@ def init(args_capsule):
         # Use default configuration if not loaded from file
         if buffer_config is None:
             buffer_config = parse_buffer_mapping_config({})
-            print("[MODBUS] Using default buffer mapping configuration")
+            logger.info("Using default buffer mapping configuration")
 
         # Safely access buffer size using validation
         buffer_size, size_error = runtime_args.safe_access_buffer_size()
         if buffer_size == -1:
-            print(f"[MODBUS] Failed to access buffer size: {size_error}")
+            logger.error(f"Failed to access buffer size: {size_error}")
             return False
 
         # Create OpenPLC-connected data blocks based on configuration
@@ -954,11 +998,11 @@ def init(args_capsule):
         )
         server_context = ModbusServerContext(devices={1: device}, single=False)
 
-        print(f"[MODBUS] Plugin initialized successfully - Host: {gIp}, Port: {gPort}")
+        logger.info(f"Plugin initialized successfully - Host: {gIp}, Port: {gPort}")
         return True
 
     except Exception as e:
-        print(f"[MODBUS] Plugin initialization failed: {e}")
+        logger.error(f"Plugin initialization failed: {e}")
         import traceback
 
         traceback.print_exc()
@@ -970,12 +1014,12 @@ def start_loop():
     global server_task, running, server_loop, server_started_event, server_error
 
     if server_context is None:
-        print("[MODBUS] Error: Plugin not initialized")
+        logger.error("Plugin not initialized")
         return False
 
     # Prevent double-start
     if server_task is not None and server_task.is_alive():
-        print("[MODBUS] Warning: Server already running")
+        logger.warn("Server already running")
         return True
 
     running = True
@@ -1011,7 +1055,7 @@ def start_loop():
 
                     # If we get here, server is listening
                     if first_attempt:
-                        print(f"[MODBUS] Server listening on {gIp}:{gPort}")
+                        logger.info(f"Server listening on {gIp}:{gPort}")
                         server_started_event.set()
                         first_attempt = False
 
@@ -1031,13 +1075,13 @@ def start_loop():
 
                     if first_attempt:
                         # Signal startup failure on first attempt
-                        print(f"[MODBUS] Failed to start server on {gIp}:{gPort}: {error_msg}")
+                        logger.error(f"Failed to start server on {gIp}:{gPort}: {error_msg}")
                         server_started_event.set()  # Unblock start_loop
 
                     if not running:
                         break  # Stop requested, don't retry
 
-                    print(f"[MODBUS] Server error, will retry in {backoff:.1f}s: {error_msg}")
+                    logger.warn(f"Server error, will retry in {backoff:.1f}s: {error_msg}")
 
                     # Wait before retry (check running flag periodically)
                     wait_time = 0
@@ -1052,7 +1096,7 @@ def start_loop():
         try:
             loop.run_until_complete(server_runner())
         except Exception as e:
-            print(f"[MODBUS] Fatal error in server thread: {e}")
+            logger.error(f"Fatal error in server thread: {e}")
         finally:
             server_loop = None
             loop.close()
@@ -1064,11 +1108,11 @@ def start_loop():
     startup_timeout = 5.0
     if server_started_event.wait(timeout=startup_timeout):
         if server_error is not None:
-            print(f"[MODBUS] Server startup failed: {server_error}")
+            logger.error(f"Server startup failed: {server_error}")
             return False
         return True
     else:
-        print(f"[MODBUS] Timeout waiting for server to start on {gIp}:{gPort}")
+        logger.error(f"Timeout waiting for server to start on {gIp}:{gPort}")
         return False
 
 
@@ -1085,14 +1129,14 @@ def stop_loop():
             ServerStop()
         except RuntimeError as e:
             # Server may not be running or already stopped
-            print(f"[MODBUS] ServerStop warning: {e}")
+            logger.warn(f"ServerStop warning: {e}")
 
         server_task.join(timeout=5.0)
         if server_task.is_alive():
-            print("[MODBUS] Warning: Server thread did not stop within timeout")
+            logger.warn("Server thread did not stop within timeout")
         server_task = None
 
-    print("[MODBUS] Server stopped")
+    logger.info("Server stopped")
     return True
 
 
@@ -1103,7 +1147,7 @@ def cleanup():
     server_context = None
     runtime_args = None
 
-    print("[MODBUS] Plugin cleaned up")
+    logger.info("Plugin cleaned up")
     return True
 
 
