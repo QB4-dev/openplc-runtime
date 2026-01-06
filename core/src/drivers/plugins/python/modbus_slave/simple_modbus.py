@@ -403,35 +403,37 @@ class OpenPLCSegmentedCoilsDataBlock(ModbusSparseDataBlock):
             return [0] * count
 
         self.safe_buffer_access.acquire_mutex()
+        try:
+            values = []
+            for i in range(count):
+                coil_addr = address + i
+                segment, buffer_idx, bit_idx = self._get_segment_info(coil_addr)
 
-        values = []
-        for i in range(count):
-            coil_addr = address + i
-            segment, buffer_idx, bit_idx = self._get_segment_info(coil_addr)
-
-            if segment == "qx":
-                value, error_msg = self.safe_buffer_access.read_bool_output(
-                    buffer_idx, bit_idx, thread_safe=False
-                )
-                if error_msg == "Success":
-                    values.append(1 if value else 0)
+                if segment == "qx":
+                    value, error_msg = self.safe_buffer_access.read_bool_output(
+                        buffer_idx, bit_idx, thread_safe=False
+                    )
+                    if error_msg == "Success":
+                        values.append(1 if value else 0)
+                    else:
+                        print(f"[MODBUS] Error reading coil %QX{coil_addr}: {error_msg}")
+                        values.append(0)
+                elif segment == "mx":
+                    mx_addr = coil_addr - self.qx_bits
+                    value, error_msg = self.safe_buffer_access.read_bool_memory(
+                        buffer_idx, bit_idx, thread_safe=False
+                    )
+                    if error_msg == "Success":
+                        values.append(1 if value else 0)
+                    else:
+                        print(f"[MODBUS] Error reading coil %MX{mx_addr}: {error_msg}")
+                        values.append(0)
                 else:
-                    print(f"[MODBUS] Error reading coil %QX{coil_addr}: {error_msg}")
                     values.append(0)
-            elif segment == "mx":
-                value, error_msg = self.safe_buffer_access.read_bool_memory(
-                    buffer_idx, bit_idx, thread_safe=False
-                )
-                if error_msg == "Success":
-                    values.append(1 if value else 0)
-                else:
-                    print(f"[MODBUS] Error reading coil %MX{coil_addr - self.qx_bits}: {error_msg}")
-                    values.append(0)
-            else:
-                values.append(0)
 
-        self.safe_buffer_access.release_mutex()
-        return values
+            return values
+        finally:
+            self.safe_buffer_access.release_mutex()
 
     def setValues(self, address, values):
         """Set coil values to appropriate OpenPLC buffer based on address segmentation"""
@@ -444,25 +446,26 @@ class OpenPLCSegmentedCoilsDataBlock(ModbusSparseDataBlock):
             return
 
         self.safe_buffer_access.acquire_mutex()
+        try:
+            for i, value in enumerate(values):
+                coil_addr = address + i
+                segment, buffer_idx, bit_idx = self._get_segment_info(coil_addr)
 
-        for i, value in enumerate(values):
-            coil_addr = address + i
-            segment, buffer_idx, bit_idx = self._get_segment_info(coil_addr)
-
-            if segment == "qx":
-                _, error_msg = self.safe_buffer_access.write_bool_output(
-                    buffer_idx, bit_idx, bool(value), thread_safe=False
-                )
-                if error_msg != "Success":
-                    print(f"[MODBUS] Error setting coil %QX{coil_addr}: {error_msg}")
-            elif segment == "mx":
-                _, error_msg = self.safe_buffer_access.write_bool_memory(
-                    buffer_idx, bit_idx, bool(value), thread_safe=False
-                )
-                if error_msg != "Success":
-                    print(f"[MODBUS] Error setting coil %MX{coil_addr - self.qx_bits}: {error_msg}")
-
-        self.safe_buffer_access.release_mutex()
+                if segment == "qx":
+                    _, error_msg = self.safe_buffer_access.write_bool_output(
+                        buffer_idx, bit_idx, bool(value), thread_safe=False
+                    )
+                    if error_msg != "Success":
+                        print(f"[MODBUS] Error setting coil %QX{coil_addr}: {error_msg}")
+                elif segment == "mx":
+                    mx_addr = coil_addr - self.qx_bits
+                    _, error_msg = self.safe_buffer_access.write_bool_memory(
+                        buffer_idx, bit_idx, bool(value), thread_safe=False
+                    )
+                    if error_msg != "Success":
+                        print(f"[MODBUS] Error setting coil %MX{mx_addr}: {error_msg}")
+        finally:
+            self.safe_buffer_access.release_mutex()
 
 
 class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
@@ -612,59 +615,60 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
             return [0] * count
 
         self.safe_buffer_access.acquire_mutex()
+        try:
+            values = []
+            for i in range(count):
+                reg_addr = address + i
+                segment, value_idx, word_offset = self._get_segment_info(reg_addr)
 
-        values = []
-        for i in range(count):
-            reg_addr = address + i
-            segment, value_idx, word_offset = self._get_segment_info(reg_addr)
+                if segment == "qw":
+                    value, error_msg = self.safe_buffer_access.read_int_output(
+                        value_idx, thread_safe=False
+                    )
+                    if error_msg == "Success":
+                        values.append(value & 0xFFFF)
+                    else:
+                        print(f"[MODBUS] Error reading %QW{value_idx}: {error_msg}")
+                        values.append(0)
 
-            if segment == "qw":
-                value, error_msg = self.safe_buffer_access.read_int_output(
-                    value_idx, thread_safe=False
-                )
-                if error_msg == "Success":
-                    values.append(value & 0xFFFF)
+                elif segment == "mw":
+                    value, error_msg = self.safe_buffer_access.read_int_memory(
+                        value_idx, thread_safe=False
+                    )
+                    if error_msg == "Success":
+                        values.append(value & 0xFFFF)
+                    else:
+                        print(f"[MODBUS] Error reading %MW{value_idx}: {error_msg}")
+                        values.append(0)
+
+                elif segment == "md":
+                    dint_value, error_msg = self.safe_buffer_access.read_dint_memory(
+                        value_idx, thread_safe=False
+                    )
+                    if error_msg == "Success":
+                        words = self._split_dint_to_words(dint_value)
+                        values.append(words[word_offset])
+                    else:
+                        print(f"[MODBUS] Error reading %MD{value_idx}: {error_msg}")
+                        values.append(0)
+
+                elif segment == "ml":
+                    lint_value, error_msg = self.safe_buffer_access.read_lint_memory(
+                        value_idx, thread_safe=False
+                    )
+                    if error_msg == "Success":
+                        words = self._split_lint_to_words(lint_value)
+                        values.append(words[word_offset])
+                    else:
+                        print(f"[MODBUS] Error reading %ML{value_idx}: {error_msg}")
+                        values.append(0)
+
                 else:
-                    print(f"[MODBUS] Error reading %QW{value_idx}: {error_msg}")
                     values.append(0)
 
-            elif segment == "mw":
-                value, error_msg = self.safe_buffer_access.read_int_memory(
-                    value_idx, thread_safe=False
-                )
-                if error_msg == "Success":
-                    values.append(value & 0xFFFF)
-                else:
-                    print(f"[MODBUS] Error reading %MW{value_idx}: {error_msg}")
-                    values.append(0)
-
-            elif segment == "md":
-                dint_value, error_msg = self.safe_buffer_access.read_dint_memory(
-                    value_idx, thread_safe=False
-                )
-                if error_msg == "Success":
-                    words = self._split_dint_to_words(dint_value)
-                    values.append(words[word_offset])
-                else:
-                    print(f"[MODBUS] Error reading %MD{value_idx}: {error_msg}")
-                    values.append(0)
-
-            elif segment == "ml":
-                lint_value, error_msg = self.safe_buffer_access.read_lint_memory(
-                    value_idx, thread_safe=False
-                )
-                if error_msg == "Success":
-                    words = self._split_lint_to_words(lint_value)
-                    values.append(words[word_offset])
-                else:
-                    print(f"[MODBUS] Error reading %ML{value_idx}: {error_msg}")
-                    values.append(0)
-
-            else:
-                values.append(0)
-
-        self.safe_buffer_access.release_mutex()
-        return values
+            return values
+        finally:
+            self.safe_buffer_access.release_mutex()
 
     def setValues(self, address, values):
         """Set holding register values to appropriate OpenPLC buffer based on address segmentation"""
@@ -677,69 +681,73 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
             return
 
         self.safe_buffer_access.acquire_mutex()
+        try:
+            # For multi-word values, we need to handle partial writes carefully
+            # Build a map of pending multi-word updates
+            pending_dint = {}  # value_idx -> {word_offset: value}
+            pending_lint = {}  # value_idx -> {word_offset: value}
 
-        # For multi-word values, we need to handle partial writes carefully
-        # Build a map of pending multi-word updates
-        pending_dint = {}  # value_idx -> {word_offset: value}
-        pending_lint = {}  # value_idx -> {word_offset: value}
+            for i, value in enumerate(values):
+                reg_addr = address + i
+                segment, value_idx, word_offset = self._get_segment_info(reg_addr)
 
-        for i, value in enumerate(values):
-            reg_addr = address + i
-            segment, value_idx, word_offset = self._get_segment_info(reg_addr)
+                if segment == "qw":
+                    _, error_msg = self.safe_buffer_access.write_int_output(
+                        value_idx, value & 0xFFFF, thread_safe=False
+                    )
+                    if error_msg != "Success":
+                        print(f"[MODBUS] Error setting %QW{value_idx}: {error_msg}")
 
-            if segment == "qw":
-                _, error_msg = self.safe_buffer_access.write_int_output(
-                    value_idx, value & 0xFFFF, thread_safe=False
+                elif segment == "mw":
+                    _, error_msg = self.safe_buffer_access.write_int_memory(
+                        value_idx, value & 0xFFFF, thread_safe=False
+                    )
+                    if error_msg != "Success":
+                        print(f"[MODBUS] Error setting %MW{value_idx}: {error_msg}")
+
+                elif segment == "md":
+                    # Collect words for this DINT
+                    if value_idx not in pending_dint:
+                        # Read current value to preserve unchanged words
+                        current, _ = self.safe_buffer_access.read_dint_memory(
+                            value_idx, thread_safe=False
+                        )
+                        pending_dint[value_idx] = self._split_dint_to_words(
+                            current if current else 0
+                        )
+                    pending_dint[value_idx][word_offset] = value & 0xFFFF
+
+                elif segment == "ml":
+                    # Collect words for this LINT
+                    if value_idx not in pending_lint:
+                        # Read current value to preserve unchanged words
+                        current, _ = self.safe_buffer_access.read_lint_memory(
+                            value_idx, thread_safe=False
+                        )
+                        pending_lint[value_idx] = self._split_lint_to_words(
+                            current if current else 0
+                        )
+                    pending_lint[value_idx][word_offset] = value & 0xFFFF
+
+            # Write pending DINT values
+            for value_idx, words in pending_dint.items():
+                dint_value = self._combine_words_to_dint(words)
+                _, error_msg = self.safe_buffer_access.write_dint_memory(
+                    value_idx, dint_value, thread_safe=False
                 )
                 if error_msg != "Success":
-                    print(f"[MODBUS] Error setting %QW{value_idx}: {error_msg}")
+                    print(f"[MODBUS] Error setting %MD{value_idx}: {error_msg}")
 
-            elif segment == "mw":
-                _, error_msg = self.safe_buffer_access.write_int_memory(
-                    value_idx, value & 0xFFFF, thread_safe=False
+            # Write pending LINT values
+            for value_idx, words in pending_lint.items():
+                lint_value = self._combine_words_to_lint(words)
+                _, error_msg = self.safe_buffer_access.write_lint_memory(
+                    value_idx, lint_value, thread_safe=False
                 )
                 if error_msg != "Success":
-                    print(f"[MODBUS] Error setting %MW{value_idx}: {error_msg}")
-
-            elif segment == "md":
-                # Collect words for this DINT
-                if value_idx not in pending_dint:
-                    # Read current value to preserve unchanged words
-                    current, _ = self.safe_buffer_access.read_dint_memory(
-                        value_idx, thread_safe=False
-                    )
-                    pending_dint[value_idx] = self._split_dint_to_words(current if current else 0)
-                pending_dint[value_idx][word_offset] = value & 0xFFFF
-
-            elif segment == "ml":
-                # Collect words for this LINT
-                if value_idx not in pending_lint:
-                    # Read current value to preserve unchanged words
-                    current, _ = self.safe_buffer_access.read_lint_memory(
-                        value_idx, thread_safe=False
-                    )
-                    pending_lint[value_idx] = self._split_lint_to_words(current if current else 0)
-                pending_lint[value_idx][word_offset] = value & 0xFFFF
-
-        # Write pending DINT values
-        for value_idx, words in pending_dint.items():
-            dint_value = self._combine_words_to_dint(words)
-            _, error_msg = self.safe_buffer_access.write_dint_memory(
-                value_idx, dint_value, thread_safe=False
-            )
-            if error_msg != "Success":
-                print(f"[MODBUS] Error setting %MD{value_idx}: {error_msg}")
-
-        # Write pending LINT values
-        for value_idx, words in pending_lint.items():
-            lint_value = self._combine_words_to_lint(words)
-            _, error_msg = self.safe_buffer_access.write_lint_memory(
-                value_idx, lint_value, thread_safe=False
-            )
-            if error_msg != "Success":
-                print(f"[MODBUS] Error setting %ML{value_idx}: {error_msg}")
-
-        self.safe_buffer_access.release_mutex()
+                    print(f"[MODBUS] Error setting %ML{value_idx}: {error_msg}")
+        finally:
+            self.safe_buffer_access.release_mutex()
 
 
 def parse_buffer_mapping_config(config_map):
