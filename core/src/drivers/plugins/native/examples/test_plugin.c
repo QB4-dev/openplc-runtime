@@ -17,8 +17,8 @@
 /* Include IEC types */
 #include "../../../../lib/iec_types.h"
 
-/* Include the actual plugin_runtime_args_t definition */
-#include "../../../plugin_driver.h"
+/* Include the plugin types (runtime args, logging function types) */
+#include "../../../plugin_types.h"
 
 /* Global logger instance */
 static plugin_logger_t g_logger;

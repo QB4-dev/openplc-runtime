@@ -4,52 +4,13 @@
  */
 
 #include "plugin_logger.h"
+#include "../../plugin_types.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
 
 /* Maximum size for formatted log messages */
 #define MAX_LOG_MESSAGE_SIZE 1024
-
-/**
- * @brief Runtime args structure (must match plugin_driver.h)
- *
- * We only need the logging function pointers from this structure.
- */
-typedef struct
-{
-    /* Buffer pointers - not used by logger */
-    void *bool_input;
-    void *bool_output;
-    void *byte_input;
-    void *byte_output;
-    void *int_input;
-    void *int_output;
-    void *dint_input;
-    void *dint_output;
-    void *lint_input;
-    void *lint_output;
-    void *int_memory;
-    void *dint_memory;
-    void *lint_memory;
-    void *bool_memory;
-
-    /* Mutex functions - not used by logger */
-    void *mutex_take;
-    void *mutex_give;
-    void *buffer_mutex;
-    char plugin_specific_config_file_path[256];
-
-    /* Buffer size information - not used by logger */
-    int buffer_size;
-    int bits_per_buffer;
-
-    /* Logging functions - these are what we need */
-    plugin_log_func_t log_info;
-    plugin_log_func_t log_debug;
-    plugin_log_func_t log_warn;
-    plugin_log_func_t log_error;
-} plugin_runtime_args_internal_t;
 
 bool plugin_logger_init(plugin_logger_t *logger, const char *plugin_name, void *runtime_args)
 {
@@ -84,7 +45,7 @@ bool plugin_logger_init(plugin_logger_t *logger, const char *plugin_name, void *
     }
 
     /* Extract logging function pointers from runtime_args */
-    plugin_runtime_args_internal_t *args = (plugin_runtime_args_internal_t *)runtime_args;
+    plugin_runtime_args_t *args = (plugin_runtime_args_t *)runtime_args;
 
     logger->log_info = args->log_info;
     logger->log_debug = args->log_debug;
