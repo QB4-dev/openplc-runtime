@@ -49,6 +49,7 @@ try:
     )
     from .opcua_memory import read_memory_direct, initialize_variable_cache
     from .opcua_security import OpcuaSecurityManager
+    from .opcua_endpoints_config import normalize_endpoint_url, suggest_client_endpoints
 except ImportError:
     # Fallback to absolute imports (when run standalone)
     from opcua_types import VariableNode, VariableMetadata
@@ -60,6 +61,14 @@ except ImportError:
     )
     from opcua_memory import read_memory_direct, initialize_variable_cache
     from opcua_security import OpcuaSecurityManager
+    from opcua_endpoints_config import normalize_endpoint_url, suggest_client_endpoints
+    
+
+from types import SimpleNamespace
+import base64
+import bcrypt
+from datetime import datetime
+from asyncua.common.callback import CallbackType
 
 # Global variables for plugin lifecycle and configuration
 runtime_args = None
@@ -87,6 +96,14 @@ def log_warn(message: str) -> None:
         safe_logging_accessor.log_warn(message)
     else:
         print(f"(WARN) {message}")
+
+def log_debug(message: str) -> None:
+    """Log a debug message using the runtime logging system."""
+    global safe_logging_accessor
+    if safe_logging_accessor and safe_logging_accessor.is_valid:
+        safe_logging_accessor.log_debug(message)
+    else:
+        print(f"(DEBUG) {message}")
 
 
 def log_error(message: str) -> None:
@@ -183,7 +200,6 @@ class OpenPLCUserManager(UserManager):
 
         elif auth_method == "Anonymous":
             if "Anonymous" in profile.auth_methods:
-                from types import SimpleNamespace
                 user = SimpleNamespace()
                 user.username = "anonymous"
                 user.openplc_role = "viewer"
@@ -305,7 +321,6 @@ class OpenPLCUserManager(UserManager):
                 cert_str = str(certificate)
                 if "-----BEGIN CERTIFICATE-----" in cert_str:
                     # PEM format - extract base64 content
-                    import base64
                     cert_lines = cert_str.split('\n')
                     cert_b64 = ''.join([line for line in cert_lines if not line.startswith('-----')])
                     cert_der = base64.b64decode(cert_b64)
@@ -323,7 +338,6 @@ class OpenPLCUserManager(UserManager):
     def _pem_to_fingerprint(self, pem_str: str) -> Optional[str]:
         """Convert PEM certificate string to SHA256 fingerprint."""
         try:
-            import base64
             # Extract base64 content from PEM
             pem_lines = pem_str.strip().split('\n')
             cert_b64 = ''.join([line for line in pem_lines if not line.startswith('-----')])
@@ -360,7 +374,6 @@ class OpenPLCUserManager(UserManager):
     def _validate_password(self, password: str, password_hash: str) -> bool:
         """Validate password against hash using bcrypt or fallback."""
         try:
-            import bcrypt
             return bcrypt.checkpw(password.encode(), password_hash.encode())
         except ImportError:
             # Fallback to simple comparison (not secure for production)
@@ -385,7 +398,14 @@ class OpcuaServer:
         self.cert_validator = None
         self.temp_cert_files = []  # Track temporary certificate files for cleanup
         self.node_permissions: Dict[str, VariablePermissions] = {}  # Maps node_id -> permissions
+        self.nodeid_to_variable: Dict[Any, str] = {}  # Maps NodeId object -> variable name
         self.security_manager = OpcuaSecurityManager(config, os.path.dirname(__file__))
+        
+        # Cache for OPC UA values to detect changes
+        self.opcua_value_cache: Dict[int, Any] = {}
+        
+        # Cycle time for OPC UA to runtime synchronization (in seconds)
+        self.opcua_to_runtime_cycle_time = self._get_opcua_to_runtime_cycle_time()
 
     async def setup_server(self) -> bool:
         """Initialize and configure the OPC-UA server using native asyncua APIs."""
@@ -395,7 +415,6 @@ class OpcuaServer:
 
             # Set the endpoint URL from configuration with normalization BEFORE init
             try:
-                from .opcua_endpoints_config import normalize_endpoint_url, suggest_client_endpoints
                 normalized_endpoint = normalize_endpoint_url(self.config.server.endpoint_url)
                 self.server.set_endpoint(normalized_endpoint)
                 
@@ -431,7 +450,6 @@ class OpcuaServer:
             log_info("OPC-UA server initialized")
 
             # Set build info AFTER init
-            from datetime import datetime
             await self.server.set_build_info(
                 product_uri=self.config.server.product_uri,
                 manufacturer_name="Autonomy Logic",
@@ -447,6 +465,13 @@ class OpcuaServer:
 
             # Setup callbacks for auditing
             await self._setup_callbacks()
+            
+            # Debug: Verify server callback configuration
+            log_info(f"Server callback support check:")
+            log_info(f"  - Server has iserver: {hasattr(self.server, 'iserver') and self.server.iserver is not None}")
+            if hasattr(self.server, 'iserver') and self.server.iserver is not None:
+                log_info(f"  - iserver type: {type(self.server.iserver)}")
+                log_info(f"  - iserver has callback support: {hasattr(self.server.iserver, 'subscribe_server_callback')}")
 
             log_info(f"OPC-UA server setup completed successfully")
             return True
@@ -507,39 +532,79 @@ class OpcuaServer:
 
     async def _setup_callbacks(self) -> None:
         """Setup callbacks for auditing and access control."""
+        log_info("=== SETTING UP CALLBACKS ===")
+        
         # Get all nodes that need callbacks (readwrite variables)
         nodes_requiring_callbacks = []
 
         # Simple variables
         for var in self.config.address_space.variables:
+            log_info(f"Checking variable {var.node_id}: permissions = {var.permissions}")
             if var.permissions.engineer == "rw" or var.permissions.operator == "rw":
                 nodes_requiring_callbacks.append(var.node_id)
+                log_info(f"  → Added {var.node_id} to callback list")
 
         # Struct fields
         for struct in self.config.address_space.structures:
             for field in struct.fields:
+                field_id = f"{struct.node_id}.{field.name}"
+                log_info(f"Checking struct field {field_id}: permissions = {field.permissions}")
                 if field.permissions.engineer == "rw" or field.permissions.operator == "rw":
-                    nodes_requiring_callbacks.append(f"{struct.node_id}.{field.name}")
+                    nodes_requiring_callbacks.append(field_id)
+                    log_info(f"  → Added {field_id} to callback list")
 
         # Arrays
         for arr in self.config.address_space.arrays:
+            log_info(f"Checking array {arr.node_id}: permissions = {arr.permissions}")
             if arr.permissions.engineer == "rw" or arr.permissions.operator == "rw":
                 nodes_requiring_callbacks.append(arr.node_id)
+                log_info(f"  → Added {arr.node_id} to callback list")
 
+        log_info(f"Total nodes requiring callbacks: {len(nodes_requiring_callbacks)}") 
+        log_info(f"Nodes list: {nodes_requiring_callbacks}")
+        
         # Register callbacks for all nodes that have any write permissions
         if nodes_requiring_callbacks:
             log_info(f"Registering callbacks for {len(nodes_requiring_callbacks)} nodes")
             try:
                 # Register pre-read and pre-write callbacks with the server
-                from asyncua.common.callback import CallbackType
+                
+                
+                log_info(f"Server iserver status: {self.server.iserver is not None}")
+                
                 if self.server.iserver is not None:
-                    await self.server.iserver.subscribe_server_callback(CallbackType.PreRead, self._on_pre_read)
+                    # Test registration
+                    log_info("Attempting to register PreWrite callback...")
                     await self.server.iserver.subscribe_server_callback(CallbackType.PreWrite, self._on_pre_write)
+                    log_info("PreWrite callback registered successfully")
+                    
+                    log_info("Attempting to register PreRead callback...")
+                    await self.server.iserver.subscribe_server_callback(CallbackType.PreRead, self._on_pre_read)
+                    log_info("PreRead callback registered successfully")
+                    
                     log_info("Successfully registered permission callbacks")
                 else:
                     log_warn("Server iserver is None, cannot register callbacks")
             except Exception as e:
-                log_warn(f"Failed to register callbacks: {e}")
+                log_error(f"Failed to register callbacks: {e}")
+                traceback.print_exc()
+                
+                # Try alternative callback registration method
+                log_info("Trying alternative callback registration...")
+                try:
+                    # Alternative: Register directly on the server instead of iserver
+                    if hasattr(self.server, 'subscribe_server_callback'):
+                        await self.server.subscribe_server_callback(CallbackType.PreWrite, self._on_pre_write)
+                        await self.server.subscribe_server_callback(CallbackType.PreRead, self._on_pre_read)
+                        log_info("Alternative callback registration successful")
+                    else:
+                        log_error("No callback registration method found")
+                except Exception as e2:
+                    log_error(f"Alternative callback registration also failed: {e2}")
+        else:
+            log_warn("No nodes require callbacks - no readwrite variables found")
+            
+        log_info("=== CALLBACK SETUP COMPLETED ===")
 
     async def _on_pre_read(self, event, dispatcher):
         """Callback for pre-read operations with permission enforcement."""
@@ -585,6 +650,10 @@ class OpcuaServer:
         # Extract user from event
         user = getattr(event, 'user', None)
         
+        # Log write attempt information
+        username = getattr(user, 'username', 'unknown') if user else 'anonymous'
+        user_role = getattr(user, 'openplc_role', 'none') if user else 'anonymous'
+        
         # The event contains request_params with WriteValues
         if not hasattr(event, 'request_params') or not hasattr(event.request_params, 'NodesToWrite'):
             return
@@ -595,15 +664,41 @@ class OpcuaServer:
             value = write_value.Value.Value if hasattr(write_value, 'Value') else None
             
             # Extract actual node_id from the full node string if needed
-            if node_id.startswith("ns=") and ";" in node_id:
-                # Extract the part after the last semicolon for comparison
-                node_parts = node_id.split(";")[-1]
-                if "=" in node_parts:
-                    simple_node_id = node_parts.split("=", 1)[-1]
+            simple_node_id = None
+            
+            found_in_mapping = False
+            for mapped_node, var_name in self.nodeid_to_variable.items():
+                if node_id == mapped_node:
+                    simple_node_id = var_name
+                    found_in_mapping = True
+                    break
+                elif str(node_id) == str(mapped_node):
+                    simple_node_id = var_name  
+                    found_in_mapping = True
+                    break
+            
+            if not found_in_mapping:
+                log_warn(f"NodeId {node_id} not found in mapping! Available mappings:")
+                for mapped_node, var_name in self.nodeid_to_variable.items():
+                    log_warn(f"  - {repr(mapped_node)} -> {var_name}")
+                
+                # Handle different NodeId formats
+                if hasattr(node_id, 'Identifier') and hasattr(node_id, 'NamespaceIndex'):
+                    # It's a NodeId object
+                    simple_node_id = f"ns={node_id.NamespaceIndex};i={node_id.Identifier}"
+                    log_info(f"  → Numeric NodeId format: {simple_node_id}")
                 else:
-                    simple_node_id = node_parts
-            else:
-                simple_node_id = node_id
+                    # It's a string NodeId
+                    node_id_str = str(node_id)
+                    if node_id_str.startswith("ns=") and ";" in node_id_str:
+                        # Extract the part after the last semicolon for comparison
+                        node_parts = node_id_str.split(";")[-1]
+                        if "=" in node_parts:
+                            simple_node_id = node_parts.split("=", 1)[-1]
+                        else:
+                            simple_node_id = node_parts
+                    else:
+                        simple_node_id = node_id_str
             
             # Check if we have permissions configured for this node
             permissions = None
@@ -620,9 +715,16 @@ class OpcuaServer:
                 user_role = user.openplc_role  # Use OpenPLC role for permission checks
                 role_permission = getattr(permissions, user_role, "")
                 
+                log_info(f"  → User role: {user_role}")
+                log_info(f"  → Role permission: '{role_permission}'")
+                
                 if "w" not in role_permission:
                     log_warn(f"DENY write for user {getattr(user, 'username', 'unknown')} (role: {user_role}) on node {simple_node_id}: {value}")
                     raise ua.UaError(f"Access denied: insufficient write permissions")
+                else:
+                    pass
+            else:
+                pass
 
     async def create_variable_nodes(self) -> bool:
         """Create OPC-UA nodes for all configured variables, structs and arrays."""
@@ -693,8 +795,14 @@ class OpcuaServer:
 
         # Set writable permissions using asyncua built-in method
         has_write_permission = self._check_write_permission(var.permissions)
+        log_info(f"Variable {var.node_id} has_write_permission: {has_write_permission}")
+        log_info(f"Variable {var.node_id} permissions: viewer={getattr(var.permissions, 'viewer', 'N/A')}, operator={getattr(var.permissions, 'operator', 'N/A')}, engineer={getattr(var.permissions, 'engineer', 'N/A')}")
+        
         if has_write_permission:
             await node.set_writable()
+            log_info(f"Node {var.node_id} set as writable")
+        else:
+            log_info(f"Node {var.node_id} set as read-only")
 
         # Store node mapping
         access_mode = "readwrite" if has_write_permission else "readonly"
@@ -709,6 +817,10 @@ class OpcuaServer:
         self.variable_nodes[var.index] = var_node
         # Store node permissions for runtime checks
         self.node_permissions[var.node_id] = var.permissions
+        # Store NodeId to variable name mapping
+        log_info(f"Storing NodeId mapping: {node.nodeid} (type: {type(node.nodeid)}) -> {var.node_id}")
+        self.nodeid_to_variable[node.nodeid] = var.node_id
+        log_info(f"Created variable {var.node_id} with NodeId: {node.nodeid}")
         # Created variable: {var.node_id}
 
     async def _create_struct(self, parent_node: Node, struct: StructVariable) -> None:
@@ -765,6 +877,9 @@ class OpcuaServer:
         self.variable_nodes[field.index] = var_node
         # Store node permissions for runtime checks
         self.node_permissions[field_node_id] = field.permissions
+        # Store NodeId to variable name mapping
+        self.nodeid_to_variable[node.nodeid] = field_node_id
+        log_info(f"Created field {field_node_id} with NodeId: {node.nodeid}")
         # Created field: {field_node_id}
 
     async def _create_array(self, parent_node: Node, arr: ArrayVariable) -> None:
@@ -807,13 +922,10 @@ class OpcuaServer:
         self.variable_nodes[arr.index] = var_node
         # Store node permissions for runtime checks
         self.node_permissions[arr.node_id] = arr.permissions
+        # Store NodeId to variable name mapping
+        self.nodeid_to_variable[node.nodeid] = arr.node_id
+        log_info(f"Created array {arr.node_id} with NodeId: {node.nodeid}")
         # Created array: {arr.node_id}
-
-
-
-
-
-
 
     async def update_variables_from_plc(self) -> None:
         """Optimized update loop with metadata cache"""
@@ -871,8 +983,14 @@ class OpcuaServer:
             # Convert value to the correct OPC-UA type for this node
             opcua_value = convert_value_for_opcua(var_node.datatype, value)
             
-            # Write the converted value - asyncua will handle Variant creation
-            await var_node.node.write_value(opcua_value)
+            # Get the expected OPC-UA type for this datatype
+            expected_opcua_type = map_plc_to_opcua_type(var_node.datatype)
+            
+            # Create Variant with explicit type to ensure compatibility
+            variant = ua.Variant(opcua_value, expected_opcua_type)
+            
+            # Write the variant with explicit type
+            await var_node.node.write_value(variant)
         except Exception as e:
             log_error(f"Failed to update OPC-UA node {var_node.debug_var_index}: {e}")
 
@@ -882,8 +1000,48 @@ class OpcuaServer:
         if not self.variable_metadata:
             self._direct_memory_access_enabled = False
 
+    def _get_opcua_to_runtime_cycle_time(self) -> float:
+        """Get cycle time for OPC UA to runtime synchronization in seconds."""
+        try:
+            cycle_time_ms = getattr(self.config, 'opcua_to_runtime_cycle_time_ms', 50)
+            
+            # Clamp between 20ms and 200ms
+            cycle_time_ms = max(20, min(200, cycle_time_ms))
+            
+            return cycle_time_ms / 1000.0
+        except Exception as e:
+            log_warn(f"Failed to get OPC UA to runtime cycle time, using default 50ms: {e}")
+            return 0.050
+
+    def _has_value_changed(self, var_index: int, new_value: Any) -> bool:
+        """Check if a value has changed compared to cached value."""
+        if var_index not in self.opcua_value_cache:
+            return True
+        
+        cached_value = self.opcua_value_cache[var_index]
+        
+        # For floats, use approximate comparison to avoid noise
+        if isinstance(new_value, float) and isinstance(cached_value, float):
+            return abs(new_value - cached_value) > 1e-6
+        
+        # For other types, use exact comparison
+        return new_value != cached_value
+
+    def _extract_opcua_value(self, opcua_value: Any) -> Any:
+        """Extract actual value from OPC UA response with robust error handling."""
+        try:
+            # If it's a DataValue with Value attribute, extract it
+            if hasattr(opcua_value, "Value"):
+                return opcua_value.Value
+            
+            # If it's already a plain value, return it
+            return opcua_value
+        except Exception as e:
+            log_error(f"Failed to extract OPC UA value: {e}")
+            return None
+
     async def sync_opcua_to_runtime(self) -> None:
-        """Synchronize values from OPC-UA readwrite nodes to PLC runtime."""
+        """Synchronize values from OPC-UA readwrite nodes to PLC runtime with change detection."""
         try:
             # Filter only readwrite variables
             readwrite_nodes = {
@@ -895,44 +1053,53 @@ class OpcuaServer:
             if not readwrite_nodes:
                 return
 
-            # Collect values to write in batch
+            # Collect values to write in batch (only changed values)
             values_to_write = []
             indices_to_write = []
+            changed_count = 0
 
             for var_index, var_node in readwrite_nodes.items():
                 try:
                     # Read current value from OPC-UA node
                     opcua_value = await var_node.node.read_value()
                     
-                    # Robust reading that checks if opcua_value has Value attribute
-                    if hasattr(opcua_value, "Value"):
-                        original_opcua_value = opcua_value.Value  # Extract from Variant
-                    else:
-                        original_opcua_value = opcua_value
-                    # If opcua_value doesn't have Value attribute, use it directly
-
+                    # Extract actual value using robust method
+                    original_opcua_value = self._extract_opcua_value(opcua_value)
+                    
+                    if original_opcua_value is None:
+                        continue
+                    
                     # Convert to PLC format
                     plc_value = convert_value_for_plc(var_node.datatype, original_opcua_value)
                     
-                    # Debug logging for type conversion issues
-                    if hasattr(opcua_value, "VariantType") and str(opcua_value.VariantType) != str(map_plc_to_opcua_type(var_node.datatype)):
-                        log_info(f"Type conversion: {var_node.datatype} - OPC-UA type {opcua_value.VariantType} -> PLC value {plc_value} (original: {original_opcua_value})")
-
-                    values_to_write.append(plc_value)
-                    indices_to_write.append(var_index)
+                    # Check if value has changed
+                    if self._has_value_changed(var_index, plc_value):
+                        values_to_write.append(plc_value)
+                        indices_to_write.append(var_index)
+                        changed_count += 1
+                        
+                        # Update cache with new value
+                        self.opcua_value_cache[var_index] = plc_value
+                        
+                        # Debug log for changed values
+                        log_debug(f"Variable {var_index} changed: {plc_value}")
+                    else:
+                        # Value unchanged, just update cache timestamp
+                        self.opcua_value_cache[var_index] = plc_value
 
                 except Exception as e:
-                    # Skip this variable on error, continue with others
+                    log_error(f"Error reading OPC-UA variable {var_index}: {e}")
                     continue
 
-            # Batch write to PLC if we have values to write
+            # Batch write to PLC only if we have changed values
             if values_to_write and indices_to_write:
+                log_debug(f"Syncing {changed_count} changed values to PLC")
+                
                 # Combine indices and values into tuples as expected by the method
                 index_value_pairs = list(zip(indices_to_write, values_to_write))
                 results, msg = self.sba.set_var_values_batch(index_value_pairs)
                 
                 # Check if the operation was successful
-                # "Batch write completed" is actually a success message, not an error
                 if msg not in ["Success", "Batch write completed"]:
                     log_error(f"Batch write to PLC failed: {msg}")
                 else:
@@ -950,6 +1117,8 @@ class OpcuaServer:
                     # Log summary if there were failures
                     if failed_count > 0:
                         log_error(f"Batch write completed with {failed_count}/{len(results)} failures")
+                    else:
+                        log_debug(f"Successfully wrote {len(results)} values to PLC")
 
         except Exception as e:
             log_error(f"Error in OPC-UA to runtime sync: {e}")
@@ -959,7 +1128,7 @@ class OpcuaServer:
         while self.running and not stop_event.is_set():
             try:
                 await self.sync_opcua_to_runtime()
-                await asyncio.sleep(0.050)  # 50ms interval
+                await asyncio.sleep(self.opcua_to_runtime_cycle_time)
 
             except Exception as e:
                 log_error(f"Error in OPC-UA to runtime loop: {e}")
@@ -998,7 +1167,7 @@ class OpcuaServer:
         """Clean up temporary certificate files."""
         for cert_path in self.temp_cert_files:
             try:
-                import os
+                
                 if os.path.exists(cert_path):
                     os.unlink(cert_path)
                     log_info(f"Cleaned up temp certificate file: {cert_path}")
