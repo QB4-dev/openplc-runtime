@@ -1,3 +1,6 @@
+# pylint: disable=R0913,R0917
+# R0913: Too many arguments (required for generic buffer operations)
+# R0917: Too many positional arguments (required for generic buffer operations)
 """
 Generic Buffer Accessor for OpenPLC Python Plugin System
 
@@ -8,18 +11,19 @@ for reading and writing buffer values.
 
 import ctypes
 from typing import Any, Optional, Tuple
+
 try:
     # Try relative imports first (when used as package)
-    from .component_interfaces import IBufferAccessor
-    from .buffer_validator import BufferValidator
-    from .mutex_manager import MutexManager
     from .buffer_types import get_buffer_types
+    from .buffer_validator import BufferValidator
+    from .component_interfaces import IBufferAccessor
+    from .mutex_manager import MutexManager
 except ImportError:
     # Fall back to absolute imports (when testing standalone)
-    from component_interfaces import IBufferAccessor
-    from buffer_validator import BufferValidator
-    from mutex_manager import MutexManager
     from buffer_types import get_buffer_types
+    from buffer_validator import BufferValidator
+    from component_interfaces import IBufferAccessor
+    from mutex_manager import MutexManager
 
 
 class GenericBufferAccessor(IBufferAccessor):
@@ -45,8 +49,13 @@ class GenericBufferAccessor(IBufferAccessor):
         self.mutex = mutex_manager
         self.buffer_types = get_buffer_types()
 
-    def read_buffer(self, buffer_type: str, buffer_idx: int, bit_idx: Optional[int] = None,
-                   thread_safe: bool = True) -> Tuple[Any, str]:
+    def read_buffer(
+        self,
+        buffer_type: str,
+        buffer_idx: int,
+        bit_idx: Optional[int] = None,
+        thread_safe: bool = True,
+    ) -> Tuple[Any, str]:
         """
         Generic buffer read operation.
 
@@ -77,8 +86,14 @@ class GenericBufferAccessor(IBufferAccessor):
         else:
             return do_read()
 
-    def write_buffer(self, buffer_type: str, buffer_idx: int, value: Any,
-                    bit_idx: Optional[int] = None, thread_safe: bool = True) -> Tuple[bool, str]:
+    def write_buffer(
+        self,
+        buffer_type: str,
+        buffer_idx: int,
+        value: Any,
+        bit_idx: Optional[int] = None,
+        thread_safe: bool = True,
+    ) -> Tuple[bool, str]:
         """
         Generic buffer write operation.
 
@@ -93,7 +108,9 @@ class GenericBufferAccessor(IBufferAccessor):
             Tuple[bool, str]: (success, error_message)
         """
         # Validate parameters
-        is_valid, msg = self.validator.validate_operation_params(buffer_type, buffer_idx, bit_idx, value)
+        is_valid, msg = self.validator.validate_operation_params(
+            buffer_type, buffer_idx, bit_idx, value
+        )
         if not is_valid:
             return False, msg
 
@@ -102,7 +119,9 @@ class GenericBufferAccessor(IBufferAccessor):
 
         # Define the write operation
         def do_write():
-            return self._perform_write(buffer_type, buffer_type_obj, direction, buffer_idx, value, bit_idx)
+            return self._perform_write(
+                buffer_type, buffer_type_obj, direction, buffer_idx, value, bit_idx
+            )
 
         # Execute with or without mutex
         if thread_safe:
@@ -126,19 +145,20 @@ class GenericBufferAccessor(IBufferAccessor):
 
             # Map buffer type to runtime_args field
             field_map = {
-                ('bool', 'input'): 'bool_input',
-                ('bool', 'output'): 'bool_output',
-                ('byte', 'input'): 'byte_input',
-                ('byte', 'output'): 'byte_output',
-                ('int', 'input'): 'int_input',
-                ('int', 'output'): 'int_output',
-                ('int', 'memory'): 'int_memory',
-                ('dint', 'input'): 'dint_input',
-                ('dint', 'output'): 'dint_output',
-                ('dint', 'memory'): 'dint_memory',
-                ('lint', 'input'): 'lint_input',
-                ('lint', 'output'): 'lint_output',
-                ('lint', 'memory'): 'lint_memory',
+                ("bool", "input"): "bool_input",
+                ("bool", "output"): "bool_output",
+                ("bool", "memory"): "bool_memory",
+                ("byte", "input"): "byte_input",
+                ("byte", "output"): "byte_output",
+                ("int", "input"): "int_input",
+                ("int", "output"): "int_output",
+                ("int", "memory"): "int_memory",
+                ("dint", "input"): "dint_input",
+                ("dint", "output"): "dint_output",
+                ("dint", "memory"): "dint_memory",
+                ("lint", "input"): "lint_input",
+                ("lint", "output"): "lint_output",
+                ("lint", "memory"): "lint_memory",
             }
 
             field_name = field_map.get((buffer_type_obj.name, direction))
@@ -150,8 +170,14 @@ class GenericBufferAccessor(IBufferAccessor):
         except (AttributeError, TypeError, ValueError):
             return None
 
-    def _perform_read(self, buffer_type: str, buffer_type_obj, direction: str,
-                     buffer_idx: int, bit_idx: Optional[int]) -> Tuple[Any, str]:
+    def _perform_read(
+        self,
+        buffer_type: str,
+        buffer_type_obj,
+        direction: str,
+        buffer_idx: int,
+        bit_idx: Optional[int],
+    ) -> Tuple[Any, str]:
         """
         Internal method to perform the actual buffer read operation.
         """
@@ -162,7 +188,7 @@ class GenericBufferAccessor(IBufferAccessor):
                 return None, f"Buffer pointer not available for {buffer_type}"
 
             # Handle boolean operations (require bit indexing)
-            if buffer_type_obj.name == 'bool':
+            if buffer_type_obj.name == "bool":
                 if bit_idx is None:
                     return None, "Bit index required for boolean operations"
 
@@ -178,8 +204,15 @@ class GenericBufferAccessor(IBufferAccessor):
         except (AttributeError, TypeError, ValueError, OSError, MemoryError) as e:
             return None, f"Buffer read error: {e}"
 
-    def _perform_write(self, buffer_type: str, buffer_type_obj, direction: str,
-                      buffer_idx: int, value: Any, bit_idx: Optional[int]) -> Tuple[bool, str]:
+    def _perform_write(
+        self,
+        buffer_type: str,
+        buffer_type_obj,
+        direction: str,
+        buffer_idx: int,
+        value: Any,
+        bit_idx: Optional[int],
+    ) -> Tuple[bool, str]:
         """
         Internal method to perform the actual buffer write operation.
         """
@@ -190,7 +223,7 @@ class GenericBufferAccessor(IBufferAccessor):
                 return False, f"Buffer pointer not available for {buffer_type}"
 
             # Handle boolean operations (require bit indexing)
-            if buffer_type_obj.name == 'bool':
+            if buffer_type_obj.name == "bool":
                 if bit_idx is None:
                     return False, "Bit index required for boolean operations"
 

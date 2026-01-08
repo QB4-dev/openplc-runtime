@@ -126,6 +126,20 @@ class SafeBufferAccess(ISafeBufferAccess):
             "bool_output", buffer_idx, value, bit_idx, thread_safe
         )
 
+    def read_bool_memory(
+        self, buffer_idx: int, bit_idx: int, thread_safe: bool = True
+    ) -> Tuple[bool, str]:
+        """Read a boolean memory value (%MX)."""
+        return self.buffer_accessor.read_buffer("bool_memory", buffer_idx, bit_idx, thread_safe)
+
+    def write_bool_memory(
+        self, buffer_idx: int, bit_idx: int, value: bool, thread_safe: bool = True
+    ) -> Tuple[bool, str]:
+        """Write a boolean memory value (%MX)."""
+        return self.buffer_accessor.write_buffer(
+            "bool_memory", buffer_idx, value, bit_idx, thread_safe
+        )
+
     # ============================================================================
     # Byte Buffer Operations
     # ============================================================================

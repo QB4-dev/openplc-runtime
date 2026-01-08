@@ -11,6 +11,9 @@ from .safe_buffer_access_refactored import SafeBufferAccess
 # Safe logging access functionality
 from .safe_logging_access import SafeLoggingAccess
 
+# Plugin logger (high-level logging interface for plugins)
+from .plugin_logger import PluginLogger
+
 # Core type definitions
 from .iec_types import IEC_BOOL, IEC_BYTE, IEC_UINT, IEC_UDINT, IEC_ULINT
 from .plugin_runtime_args import PluginRuntimeArgs
@@ -33,6 +36,9 @@ __all__ = [
 
     # Safe logging access functionality
     'SafeLoggingAccess',
+
+    # Plugin logger (high-level interface)
+    'PluginLogger',
 
     # IEC type definitions
     'IEC_BOOL', 'IEC_BYTE', 'IEC_UINT', 'IEC_UDINT', 'IEC_ULINT',

@@ -1,152 +1,184 @@
+/**
+ * @file test_plugin.c
+ * @brief Example native plugin demonstrating proper logging usage
+ *
+ * This plugin demonstrates how to use the centralized plugin logger
+ * to ensure all log messages are visible in the OpenPLC Editor.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 
-// Include IEC types
+/* Include the plugin logger */
+#include "../plugin_logger.h"
+
+/* Include IEC types */
 #include "../../../../lib/iec_types.h"
 
-// Define plugin_runtime_args_t structure locally to avoid Python dependencies
-typedef struct
-{
-    // Buffer pointers
-    IEC_BOOL *(*bool_input)[8];
-    IEC_BOOL *(*bool_output)[8];
-    IEC_BYTE **byte_input;
-    IEC_BYTE **byte_output;
-    IEC_UINT **int_input;
-    IEC_UINT **int_output;
-    IEC_UDINT **dint_input;
-    IEC_UDINT **dint_output;
-    IEC_ULINT **lint_input;
-    IEC_ULINT **lint_output;
-    IEC_UINT **int_memory;
-    IEC_UDINT **dint_memory;
-    IEC_ULINT **lint_memory;
+/* Include the plugin types (runtime args, logging function types) */
+#include "../../../plugin_types.h"
 
-    // Mutex functions
-    int (*mutex_take)(pthread_mutex_t *mutex);
-    int (*mutex_give)(pthread_mutex_t *mutex);
-    pthread_mutex_t *buffer_mutex;
-    char plugin_specific_config_file_path[256];
+/* Global logger instance */
+static plugin_logger_t g_logger;
 
-    // Buffer size information
-    int buffer_size;
-    int bits_per_buffer;
-} plugin_runtime_args_t;
-
-// Global variable to track plugin state
+/* Global variable to track plugin state */
 static int plugin_initialized = 0;
 static int plugin_running = 0;
 
-// Required init function
-// This function is called when the plugin is loaded
-// args: pointer to plugin_runtime_args_t structure containing runtime buffers and mutex functions
+/* Store runtime args for mutex access */
+static plugin_runtime_args_t *g_runtime_args = NULL;
+
+/**
+ * @brief Initialize the plugin
+ *
+ * This function is called when the plugin is loaded.
+ * @param args Pointer to plugin_runtime_args_t containing runtime buffers,
+ *             mutex functions, and logging function pointers
+ * @return 0 on success, -1 on failure
+ */
 int init(void *args)
 {
-    printf("[TEST_PLUGIN]: Initializing test plugin...\n");
+    /* Initialize logger first (before we have runtime_args) */
+    plugin_logger_init(&g_logger, "TEST_PLUGIN", NULL);
+    plugin_logger_info(&g_logger, "Initializing test plugin...");
 
-    if (!args) {
-        fprintf(stderr, "[TEST_PLUGIN]: Error - init args is NULL\n");
+    if (!args)
+    {
+        plugin_logger_error(&g_logger, "init args is NULL");
         return -1;
     }
 
-    plugin_runtime_args_t *runtime_args = (plugin_runtime_args_t *)args;
+    g_runtime_args = (plugin_runtime_args_t *)args;
 
-    // Print some information about the runtime args
-    printf("[TEST_PLUGIN]: Buffer size: %d\n", runtime_args->buffer_size);
-    printf("[TEST_PLUGIN]: Bits per buffer: %d\n", runtime_args->bits_per_buffer);
-    printf("[TEST_PLUGIN]: Plugin config path: %s\n", runtime_args->plugin_specific_config_file_path);
+    /* Re-initialize logger with runtime_args for central logging */
+    plugin_logger_init(&g_logger, "TEST_PLUGIN", args);
 
-    // Test mutex functions if available
-    if (runtime_args->mutex_take && runtime_args->mutex_give && runtime_args->buffer_mutex) {
-        printf("[TEST_PLUGIN]: Testing mutex functions...\n");
-        if (runtime_args->mutex_take(runtime_args->buffer_mutex) == 0) {
-            printf("[TEST_PLUGIN]: Mutex acquired successfully\n");
-            runtime_args->mutex_give(runtime_args->buffer_mutex);
-            printf("[TEST_PLUGIN]: Mutex released successfully\n");
-        } else {
-            fprintf(stderr, "[TEST_PLUGIN]: Failed to acquire mutex\n");
+    /* Print some information about the runtime args */
+    plugin_logger_info(&g_logger, "Buffer size: %d", g_runtime_args->buffer_size);
+    plugin_logger_info(&g_logger, "Bits per buffer: %d", g_runtime_args->bits_per_buffer);
+    plugin_logger_debug(&g_logger, "Plugin config path: %s",
+                        g_runtime_args->plugin_specific_config_file_path);
+
+    /* Test mutex functions if available */
+    if (g_runtime_args->mutex_take && g_runtime_args->mutex_give && g_runtime_args->buffer_mutex)
+    {
+        plugin_logger_debug(&g_logger, "Testing mutex functions...");
+        if (g_runtime_args->mutex_take(g_runtime_args->buffer_mutex) == 0)
+        {
+            plugin_logger_debug(&g_logger, "Mutex acquired successfully");
+            g_runtime_args->mutex_give(g_runtime_args->buffer_mutex);
+            plugin_logger_debug(&g_logger, "Mutex released successfully");
+        }
+        else
+        {
+            plugin_logger_warn(&g_logger, "Failed to acquire mutex");
         }
     }
 
     plugin_initialized = 1;
-    printf("[TEST_PLUGIN]: Test plugin initialized successfully!\n");
+    plugin_logger_info(&g_logger, "Test plugin initialized successfully!");
     return 0;
 }
 
-// Optional start_loop function
-// This function is called when the plugin should start its main loop
-void start_loop()
+/**
+ * @brief Start the plugin main loop
+ *
+ * This function is called when the plugin should start its main loop.
+ */
+void start_loop(void)
 {
-    if (!plugin_initialized) {
-        fprintf(stderr, "[TEST_PLUGIN]: Cannot start - plugin not initialized\n");
+    if (!plugin_initialized)
+    {
+        plugin_logger_error(&g_logger, "Cannot start - plugin not initialized");
         return;
     }
 
-    printf("[TEST_PLUGIN]: Starting test plugin loop...\n");
+    plugin_logger_info(&g_logger, "Starting test plugin loop...");
     plugin_running = 1;
-    printf("[TEST_PLUGIN]: Test plugin loop started!\n");
+    plugin_logger_info(&g_logger, "Test plugin loop started!");
 }
 
-// Optional stop_loop function
-// This function is called when the plugin should stop its main loop
-void stop_loop()
+/**
+ * @brief Stop the plugin main loop
+ *
+ * This function is called when the plugin should stop its main loop.
+ */
+void stop_loop(void)
 {
-    if (!plugin_running) {
-        printf("[TEST_PLUGIN]: Plugin loop already stopped\n");
+    if (!plugin_running)
+    {
+        plugin_logger_info(&g_logger, "Plugin loop already stopped");
         return;
     }
 
-    printf("[TEST_PLUGIN]: Stopping test plugin loop...\n");
+    plugin_logger_info(&g_logger, "Stopping test plugin loop...");
     plugin_running = 0;
-    printf("[TEST_PLUGIN]: Test plugin loop stopped!\n");
+    plugin_logger_info(&g_logger, "Test plugin loop stopped!");
 }
 
-// Optional cycle_start function
-// This function is called at the start of each PLC cycle if the plugin needs to run synchronously
-void cycle_start()
+/**
+ * @brief Called at the start of each PLC scan cycle
+ *
+ * This function is called at the start of each PLC cycle if the plugin
+ * needs to run synchronously with the scan cycle.
+ */
+void cycle_start(void)
 {
-    if (!plugin_initialized || !plugin_running) {
-        return; // Silent if not running
+    if (!plugin_initialized || !plugin_running)
+    {
+        return; /* Silent if not running */
     }
 
-    // Simple test - just print a message occasionally
+    /* Simple test - log a message occasionally */
     static int cycle_count = 0;
     cycle_count++;
 
-    if (cycle_count % 1000 == 0) { // Print every 1000 cycles
-        printf("[TEST_PLUGIN]: Starting cycle %d\n", cycle_count);
+    if (cycle_count % 1000 == 0)
+    { /* Log every 1000 cycles */
+        plugin_logger_debug(&g_logger, "Starting cycle %d", cycle_count);
     }
 }
 
-// Optional cycle_end function
-// This function is called at the end of each PLC cycle if the plugin needs to run synchronously
-void cycle_end()
+/**
+ * @brief Called at the end of each PLC scan cycle
+ *
+ * This function is called at the end of each PLC cycle if the plugin
+ * needs to run synchronously with the scan cycle.
+ */
+void cycle_end(void)
 {
-    if (!plugin_initialized || !plugin_running) {
-        return; // Silent if not running
+    if (!plugin_initialized || !plugin_running)
+    {
+        return; /* Silent if not running */
     }
 
-    // Simple test - just print a message occasionally
+    /* Simple test - log a message occasionally */
     static int cycle_count = 0;
     cycle_count++;
 
-    if (cycle_count % 1000 == 0) { // Print every 1000 cycles
-        printf("[TEST_PLUGIN]: Ending cycle %d\n", cycle_count);
+    if (cycle_count % 1000 == 0)
+    { /* Log every 1000 cycles */
+        plugin_logger_debug(&g_logger, "Ending cycle %d", cycle_count);
     }
 }
 
-// Optional cleanup function
-// This function is called when the plugin is being unloaded
-void cleanup()
+/**
+ * @brief Cleanup plugin resources
+ *
+ * This function is called when the plugin is being unloaded.
+ */
+void cleanup(void)
 {
-    printf("[TEST_PLUGIN]: Cleaning up test plugin...\n");
+    plugin_logger_info(&g_logger, "Cleaning up test plugin...");
 
-    if (plugin_running) {
+    if (plugin_running)
+    {
         stop_loop();
     }
 
     plugin_initialized = 0;
-    printf("[TEST_PLUGIN]: Test plugin cleaned up successfully!\n");
+    g_runtime_args = NULL;
+    plugin_logger_info(&g_logger, "Test plugin cleaned up successfully!");
 }
