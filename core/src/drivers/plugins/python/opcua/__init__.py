@@ -7,10 +7,17 @@ providing industrial-grade connectivity using the asyncua library.
 Architecture:
     - plugin.py: Entry point with init/start_loop/stop_loop/cleanup
     - config.py: Configuration loading and validation
-    - logging.py: Centralized logging
-    - types/: Type definitions and converters
-    - security/: Certificate, user, and permission management
-    - server/: Server lifecycle, address space, and synchronization
+    - opcua_logging.py: Centralized logging singleton
+    - server.py: OpcuaServerManager (main orchestrator)
+    - address_space.py: AddressSpaceBuilder (node creation)
+    - synchronization.py: SynchronizationManager (bidirectional sync)
+    - user_manager.py: OpenPLCUserManager (authentication)
+    - callbacks.py: PermissionCallbackHandler (access control)
+    - opcua_types.py: Type definitions (VariableNode, VariableMetadata)
+    - opcua_utils.py: Utility functions (type mapping, conversion)
+    - opcua_security.py: OpcuaSecurityManager (certificates, policies)
+    - opcua_memory.py: Direct memory access utilities
+    - opcua_endpoints_config.py: Endpoint URL utilities
 
 Usage:
     The plugin is loaded by the OpenPLC runtime plugin system.

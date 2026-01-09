@@ -1,21 +1,22 @@
 """OPC-UA plugin utility functions."""
 
 import ctypes
+import os
+import sys
 import struct
 from typing import Any
 from asyncua import ua
 
-# Import logging functions from the main plugin module
+# Add directories to path for module access
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
+
+# Import logging (handle both package and direct loading)
 try:
-    from . import opcua_plugin
-    log_info = opcua_plugin.log_info
-    log_warn = opcua_plugin.log_warn
-    log_error = opcua_plugin.log_error
+    from .opcua_logging import log_info, log_warn, log_error
 except ImportError:
-    # Fallback for direct execution or testing
-    def log_info(msg): print(f"(INFO) {msg}")
-    def log_warn(msg): print(f"(WARN) {msg}")
-    def log_error(msg): print(f"(ERROR) {msg}")
+    from opcua_logging import log_info, log_warn, log_error
 
 
 def map_plc_to_opcua_type(plc_type: str) -> ua.VariantType:

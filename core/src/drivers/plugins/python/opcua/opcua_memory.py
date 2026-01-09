@@ -1,26 +1,22 @@
 """OPC-UA plugin memory access utilities."""
 
 import ctypes
+import os
+import sys
 from typing import Any, List, Dict
 
-try:
-    # Try relative imports first (when used as package)
-    from .opcua_types import VariableMetadata
-except ImportError:
-    # Fallback to absolute imports (when run standalone)
-    from opcua_types import VariableMetadata
+# Add directories to path for module access
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
 
-# Import logging functions from the main plugin module
+# Import local modules (handle both package and direct loading)
 try:
-    from . import opcua_plugin
-    log_info = opcua_plugin.log_info
-    log_warn = opcua_plugin.log_warn
-    log_error = opcua_plugin.log_error
+    from .opcua_types import VariableMetadata
+    from .opcua_logging import log_info, log_warn, log_error
 except ImportError:
-    # Fallback for direct execution or testing
-    def log_info(msg): print(f"(INFO) {msg}")
-    def log_warn(msg): print(f"(WARN) {msg}")
-    def log_error(msg): print(f"(ERROR) {msg}")
+    from opcua_types import VariableMetadata
+    from opcua_logging import log_info, log_warn, log_error
 
 
 def read_memory_direct(address: int, size: int) -> Any:

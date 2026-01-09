@@ -16,24 +16,40 @@ import asyncio
 import threading
 from typing import Optional
 
-# Add parent directory to path for shared module access
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Add current and parent directories to path for module access
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_current_dir)
 
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
+
+# Import shared modules
 from shared import (
     SafeBufferAccess,
     SafeLoggingAccess,
     safe_extract_runtime_args_from_capsule,
 )
+from shared.plugin_config_decode.opcua_config_model import OpcuaConfig
 
-from .logging import get_logger, log_info, log_warn, log_error
-from .config import load_config
-from .server import OpcuaServerManager
+# Import local modules (use absolute imports for runtime compatibility)
+try:
+    # Try relative imports first (when loaded as package)
+    from .opcua_logging import get_logger, log_info, log_warn, log_error
+    from .config import load_config
+    from .server import OpcuaServerManager
+except ImportError:
+    # Fall back to absolute imports (when loaded directly by runtime)
+    from opcua_logging import get_logger, log_info, log_warn, log_error
+    from config import load_config
+    from server import OpcuaServerManager
 
 
 # Plugin state
 _runtime_args = None
 _buffer_accessor: Optional[SafeBufferAccess] = None
-_config: Optional[dict] = None
+_config: Optional[OpcuaConfig] = None
 _server_manager: Optional[OpcuaServerManager] = None
 _server_thread: Optional[threading.Thread] = None
 _stop_event = threading.Event()

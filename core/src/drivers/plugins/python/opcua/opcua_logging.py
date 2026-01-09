@@ -23,6 +23,7 @@ class OpcuaLogger:
         self._log_info_fn: Optional[Callable[[str], None]] = None
         self._log_warn_fn: Optional[Callable[[str], None]] = None
         self._log_error_fn: Optional[Callable[[str], None]] = None
+        self._log_debug_fn: Optional[Callable[[str], None]] = None
         self._initialized = False
     
     @classmethod
@@ -56,6 +57,7 @@ class OpcuaLogger:
         self._log_info_fn = getattr(logging_accessor, 'log_info', None)
         self._log_warn_fn = getattr(logging_accessor, 'log_warn', None)
         self._log_error_fn = getattr(logging_accessor, 'log_error', None)
+        self._log_debug_fn = getattr(logging_accessor, 'log_debug', None)
         self._initialized = True
         return True
     
@@ -89,6 +91,16 @@ class OpcuaLogger:
                 pass
         print(f"[OPCUA ERROR] {message}", file=sys.stderr)
 
+    def debug(self, message: str) -> None:
+        """Log a debug message."""
+        if self._initialized and self._log_debug_fn:
+            try:
+                self._log_debug_fn(message)
+                return
+            except Exception:
+                pass
+        print(f"[OPCUA DEBUG] {message}", file=sys.stdout)
+
 
 # Module-level convenience functions
 def get_logger() -> OpcuaLogger:
@@ -109,3 +121,8 @@ def log_warn(message: str) -> None:
 def log_error(message: str) -> None:
     """Log an error message."""
     get_logger().error(message)
+
+
+def log_debug(message: str) -> None:
+    """Log a debug message."""
+    get_logger().debug(message)

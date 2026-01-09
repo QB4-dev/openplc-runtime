@@ -1,0 +1,376 @@
+"""
+OPC UA Address Space Builder.
+
+This module provides the AddressSpaceBuilder class that creates OPC-UA nodes
+from configuration. It handles simple variables, structures, and arrays.
+"""
+
+import os
+import sys
+import traceback
+from typing import Dict, Any, Optional
+
+from asyncua import Server, ua
+from asyncua.common.node import Node
+
+# Add directories to path for module access
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_current_dir)
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
+
+# Import local modules (handle both package and direct loading)
+try:
+    from .opcua_logging import log_info, log_warn, log_error
+    from .opcua_types import VariableNode
+    from .opcua_utils import map_plc_to_opcua_type, convert_value_for_opcua
+except ImportError:
+    from opcua_logging import log_info, log_warn, log_error
+    from opcua_types import VariableNode
+    from opcua_utils import map_plc_to_opcua_type, convert_value_for_opcua
+
+from shared.plugin_config_decode.opcua_config_model import (
+    OpcuaConfig,
+    SimpleVariable,
+    StructVariable,
+    VariableField,
+    ArrayVariable,
+    VariablePermissions,
+)
+
+
+class AddressSpaceBuilder:
+    """
+    Builds OPC-UA address space from configuration.
+
+    Creates:
+    - Simple variable nodes
+    - Struct objects with field variables
+    - Array variable nodes
+
+    After building, provides mappings for:
+    - variable_nodes: Dict[int, VariableNode] - index to node mapping
+    - node_permissions: Dict[str, VariablePermissions] - node_id to permissions
+    - nodeid_to_variable: Dict[Any, str] - NodeId to variable name mapping
+    """
+
+    def __init__(
+        self,
+        server: Server,
+        namespace_idx: int,
+        config: OpcuaConfig
+    ):
+        """
+        Initialize the address space builder.
+
+        Args:
+            server: The asyncua Server instance
+            namespace_idx: Namespace index for created nodes
+            config: Typed OpcuaConfig instance
+        """
+        self.server = server
+        self.namespace_idx = namespace_idx
+        self.config = config
+
+        # Output mappings (populated during build)
+        self.variable_nodes: Dict[int, VariableNode] = {}
+        self.node_permissions: Dict[str, VariablePermissions] = {}
+        self.nodeid_to_variable: Dict[Any, str] = {}
+
+    async def build(self) -> bool:
+        """
+        Create all nodes from configuration.
+
+        Returns:
+            True if all nodes created successfully, False on error
+        """
+        try:
+            # Get the Objects folder as parent
+            objects = self.server.get_objects_node()
+
+            # Create simple variables
+            for var in self.config.address_space.variables:
+                try:
+                    await self._create_simple_variable(objects, var)
+                except Exception as e:
+                    log_error(f"Error creating variable {var.node_id}: {e}")
+                    traceback.print_exc()
+
+            # Create structures
+            for struct in self.config.address_space.structures:
+                try:
+                    await self._create_struct(objects, struct)
+                except Exception as e:
+                    log_error(f"Error creating struct {struct.node_id}: {e}")
+                    traceback.print_exc()
+
+            # Create arrays
+            for arr in self.config.address_space.arrays:
+                try:
+                    await self._create_array(objects, arr)
+                except Exception as e:
+                    log_error(f"Error creating array {arr.node_id}: {e}")
+                    traceback.print_exc()
+
+            log_info(f"Created {len(self.variable_nodes)} variable nodes")
+            return True
+
+        except Exception as e:
+            log_error(f"Failed to create address space: {e}")
+            traceback.print_exc()
+            return False
+
+    async def _create_simple_variable(
+        self,
+        parent_node: Node,
+        var: SimpleVariable
+    ) -> None:
+        """
+        Create a simple OPC-UA variable node.
+
+        Args:
+            parent_node: Parent node (typically Objects folder)
+            var: SimpleVariable configuration
+        """
+        opcua_type = map_plc_to_opcua_type(var.datatype)
+        initial_value = convert_value_for_opcua(var.datatype, var.initial_value)
+
+        # Create the variable node
+        node = await parent_node.add_variable(
+            self.namespace_idx,
+            var.browse_name,
+            ua.Variant(initial_value, opcua_type),
+            datatype=opcua_type
+        )
+
+        # Set display name and description
+        await node.write_attribute(
+            ua.AttributeIds.DisplayName,
+            ua.DataValue(ua.Variant(
+                ua.LocalizedText(var.display_name),
+                ua.VariantType.LocalizedText
+            ))
+        )
+        await node.write_attribute(
+            ua.AttributeIds.Description,
+            ua.DataValue(ua.Variant(
+                ua.LocalizedText(var.description),
+                ua.VariantType.LocalizedText
+            ))
+        )
+
+        # Set writable if any role has write permission
+        has_write_permission = self._check_write_permission(var.permissions)
+        if has_write_permission:
+            await node.set_writable()
+            log_info(f"Node {var.node_id} set as writable")
+        else:
+            log_info(f"Node {var.node_id} set as read-only")
+
+        # Store node mapping
+        access_mode = "readwrite" if has_write_permission else "readonly"
+        var_node = VariableNode(
+            node=node,
+            debug_var_index=var.index,
+            datatype=var.datatype,
+            access_mode=access_mode,
+            is_array_element=False
+        )
+
+        self.variable_nodes[var.index] = var_node
+        self.node_permissions[var.node_id] = var.permissions
+        self.nodeid_to_variable[node.nodeid] = var.node_id
+
+        log_info(f"Created variable {var.node_id} (index: {var.index})")
+
+    async def _create_struct(
+        self,
+        parent_node: Node,
+        struct: StructVariable
+    ) -> None:
+        """
+        Create an OPC-UA struct (object with fields).
+
+        Args:
+            parent_node: Parent node (typically Objects folder)
+            struct: StructVariable configuration
+        """
+        # Create parent object for the struct
+        struct_obj = await parent_node.add_object(
+            self.namespace_idx,
+            struct.browse_name
+        )
+
+        # Set display name and description
+        await struct_obj.write_attribute(
+            ua.AttributeIds.DisplayName,
+            ua.DataValue(ua.Variant(
+                ua.LocalizedText(struct.display_name),
+                ua.VariantType.LocalizedText
+            ))
+        )
+        await struct_obj.write_attribute(
+            ua.AttributeIds.Description,
+            ua.DataValue(ua.Variant(
+                ua.LocalizedText(struct.description),
+                ua.VariantType.LocalizedText
+            ))
+        )
+
+        # Create fields
+        for field in struct.fields:
+            await self._create_struct_field(struct_obj, struct.node_id, field)
+
+        log_info(f"Created struct {struct.node_id} with {len(struct.fields)} fields")
+
+    async def _create_struct_field(
+        self,
+        parent_node: Node,
+        struct_node_id: str,
+        field: VariableField
+    ) -> None:
+        """
+        Create a field within a struct.
+
+        Args:
+            parent_node: Parent struct object node
+            struct_node_id: Parent struct's node_id for building field path
+            field: VariableField configuration
+        """
+        field_node_id = f"{struct_node_id}.{field.name}"
+
+        opcua_type = map_plc_to_opcua_type(field.datatype)
+        initial_value = convert_value_for_opcua(field.datatype, field.initial_value)
+
+        # Create the variable node
+        node = await parent_node.add_variable(
+            self.namespace_idx,
+            field.name,
+            ua.Variant(initial_value, opcua_type),
+            datatype=opcua_type
+        )
+
+        # Set display name
+        await node.write_attribute(
+            ua.AttributeIds.DisplayName,
+            ua.DataValue(ua.Variant(
+                ua.LocalizedText(field.name),
+                ua.VariantType.LocalizedText
+            ))
+        )
+
+        # Set writable if any role has write permission
+        has_write_permission = self._check_write_permission(field.permissions)
+        if has_write_permission:
+            await node.set_writable()
+
+        # Store node mapping
+        access_mode = "readwrite" if has_write_permission else "readonly"
+        var_node = VariableNode(
+            node=node,
+            debug_var_index=field.index,
+            datatype=field.datatype,
+            access_mode=access_mode,
+            is_array_element=False
+        )
+
+        self.variable_nodes[field.index] = var_node
+        self.node_permissions[field_node_id] = field.permissions
+        self.nodeid_to_variable[node.nodeid] = field_node_id
+
+        log_info(f"Created field {field_node_id} (index: {field.index})")
+
+    async def _create_array(
+        self,
+        parent_node: Node,
+        arr: ArrayVariable
+    ) -> None:
+        """
+        Create an OPC-UA array variable.
+
+        Args:
+            parent_node: Parent node (typically Objects folder)
+            arr: ArrayVariable configuration
+        """
+        opcua_type = map_plc_to_opcua_type(arr.datatype)
+        initial_value = convert_value_for_opcua(arr.datatype, arr.initial_value)
+
+        # Create array with initial values
+        array_values = [initial_value] * arr.length
+        array_variant = ua.Variant(array_values, opcua_type)
+
+        # Create the variable node
+        node = await parent_node.add_variable(
+            self.namespace_idx,
+            arr.browse_name,
+            array_variant,
+            datatype=opcua_type
+        )
+
+        # Set display name
+        await node.write_attribute(
+            ua.AttributeIds.DisplayName,
+            ua.DataValue(ua.Variant(
+                ua.LocalizedText(arr.display_name),
+                ua.VariantType.LocalizedText
+            ))
+        )
+
+        # Set writable if any role has write permission
+        has_write_permission = self._check_write_permission(arr.permissions)
+        if has_write_permission:
+            await node.set_writable()
+
+        # Store node mapping
+        access_mode = "readwrite" if has_write_permission else "readonly"
+        var_node = VariableNode(
+            node=node,
+            debug_var_index=arr.index,
+            datatype=arr.datatype,
+            access_mode=access_mode,
+            is_array_element=False
+        )
+
+        self.variable_nodes[arr.index] = var_node
+        self.node_permissions[arr.node_id] = arr.permissions
+        self.nodeid_to_variable[node.nodeid] = arr.node_id
+
+        log_info(f"Created array {arr.node_id}[{arr.length}] (index: {arr.index})")
+
+    def _check_write_permission(self, permissions: VariablePermissions) -> bool:
+        """
+        Check if any role has write permission.
+
+        Args:
+            permissions: VariablePermissions object
+
+        Returns:
+            True if any role has write permission
+        """
+        try:
+            if not permissions:
+                log_warn("No permissions object provided, defaulting to read-only")
+                return False
+
+            # Check each role for write permission
+            viewer_perm = getattr(permissions, 'viewer', '')
+            operator_perm = getattr(permissions, 'operator', '')
+            engineer_perm = getattr(permissions, 'engineer', '')
+
+            has_write = (
+                (viewer_perm and 'w' in str(viewer_perm)) or
+                (operator_perm and 'w' in str(operator_perm)) or
+                (engineer_perm and 'w' in str(engineer_perm))
+            )
+
+            return bool(has_write)
+
+        except (AttributeError, TypeError) as e:
+            log_warn(f"Invalid permissions object: {e}, defaulting to read-only")
+            return False
+
+    def get_variable_indices(self) -> list:
+        """Get list of all variable indices for memory cache initialization."""
+        return list(self.variable_nodes.keys())
