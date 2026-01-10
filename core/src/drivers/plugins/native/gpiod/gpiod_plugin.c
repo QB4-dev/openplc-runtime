@@ -14,7 +14,7 @@
 static plugin_logger_t g_logger;
 
 /* Runtime args */
-static plugin_runtime_args_t *g_runtime_args = NULL;
+static plugin_runtime_args_t g_args; // Plugin-owned copy
 
 /* Plugin state */
 static int plugin_initialized = 0;
@@ -193,16 +193,16 @@ int init(void *args)
 
     if (!args)
     {
-        plugin_logger_error(&g_logger, "init args NULL");
         return -1;
     }
-    g_runtime_args = (plugin_runtime_args_t *)args;
+    // Copy the entire structure
+    memcpy(&g_args, args, sizeof(plugin_runtime_args_t));
+    // Now g_args can be safely used in start_loop, stop_loop, etc.
+
     plugin_logger_init(&g_logger, "GPIOD_PLUGIN", args);
+    plugin_logger_info(&g_logger, "Plugin CSV: %s", g_args.plugin_specific_config_file_path);
 
-    plugin_logger_info(&g_logger, "Plugin CSV: %s",
-                       g_runtime_args->plugin_specific_config_file_path);
-
-    if (init_io_from_csv(g_runtime_args->plugin_specific_config_file_path) != 0)
+    if (init_io_from_csv(g_args.plugin_specific_config_file_path) != 0)
     {
         plugin_logger_error(&g_logger, "Failed to initialize I/O from CSV");
         return -1;
@@ -246,7 +246,7 @@ void cycle_start(void)
             {
                 int val = gpiod_line_request_get_value(inputs[b][bit], 0);
                 if (val >= 0)
-                    *g_runtime_args->bool_input[b][bit] = val ? 1 : 0;
+                    *g_args.bool_input[b][bit] = val ? 1 : 0;
             }
         }
     }
@@ -264,7 +264,7 @@ void cycle_end(void)
         {
             if (outputs[b][bit])
             {
-                int val = *g_runtime_args->bool_output[b][bit] ? 1 : 0;
+                int val = *g_args.bool_output[b][bit] ? 1 : 0;
                 gpiod_line_request_set_value(outputs[b][bit], 0, val);
             }
         }
@@ -300,6 +300,6 @@ void cleanup(void)
     }
 
     plugin_initialized = 0;
-    g_runtime_args     = NULL;
+    memset(&g_args, 0, sizeof(plugin_runtime_args_t));
     plugin_logger_info(&g_logger, "GPIOD plugin cleanup complete");
 }
