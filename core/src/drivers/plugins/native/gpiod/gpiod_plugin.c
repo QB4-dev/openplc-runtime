@@ -110,6 +110,10 @@ static int init_io_from_csv(const char *filename)
 
     while (fgets(line, sizeof(line), fp))
     {
+        /* Strip trailing CR/LF */
+        line[strcspn(line, "\r")] = '\0';
+        line[strcspn(line, "\n")] = '\0';
+
         char *iec  = strtok(line, ",");
         char *chip = strtok(NULL, ",");
         char *lin  = strtok(NULL, ",");
@@ -127,7 +131,7 @@ static int init_io_from_csv(const char *filename)
         unsigned offset;
         if (parse_line_identifier(lin, chip, &offset) != 0)
         {
-            plugin_logger_warn(&g_logger, "Line %s not found on %s", lin, chip);
+            plugin_logger_warn(&g_logger, "Line %s:%s not found", chip,lin);
             continue;
         }
 
@@ -193,6 +197,7 @@ int init(void *args)
 
     if (!args)
     {
+        plugin_logger_error(&g_logger, "init args NULL");
         return -1;
     }
     // Copy the entire structure
