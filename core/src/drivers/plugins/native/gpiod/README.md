@@ -1,7 +1,7 @@
 # GPIOD Plugin for OpenPLC
 
 A native plugin for OpenPLC that provides GPIO (General Purpose Input/Output) support using the `libgpiod` library.
-It can be used on an Linux device with GPIOs, not only on RaspberryPi, even on PC with USB-GPIO devices
+It can be used on any Linux device with GPIOs, not only on RaspberryPi, even on PC with USB-GPIO devices
 
 ## Dependencies
 
