@@ -42,14 +42,14 @@ IEC_ADDRESS,CHIP_NAME,LINE_IDENTIFIER
   - `<byte>`: Buffer index (0-1023)
   - `<bit>`: Bit position within byte (0-7)
 
-- **CHIP_NAME**: GPIO chip device name
-  - Typically `gpiochip0`, `gpiochip1`, etc.
-  - Found in `/dev/gpiochip*`
+- **CHIP_NAME**: GPIO chip device path
+  - Typically `/dev/gpiochip0`, `/dev/gpiochip1`, etc.
+  - Found in `/dev/*` directory
 
 - **LINE_IDENTIFIER**: GPIO line reference
   - Can be a numeric offset (e.g., `0`, `5`, `17`)
   - Or a named line (e.g., `LED_STATUS`, `BUTTON_RESET`)
-  - Named lines are resolved via the chip's line information
+  - Named lines are resolved via the chip's line names information
 
 ### Example I/O mapping CSV File
 
