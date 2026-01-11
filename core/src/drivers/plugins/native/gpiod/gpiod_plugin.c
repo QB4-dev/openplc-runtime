@@ -131,7 +131,7 @@ static int init_io_from_csv(const char *filename)
         unsigned offset;
         if (parse_line_identifier(lin, chip, &offset) != 0)
         {
-            plugin_logger_warn(&g_logger, "Line %s:%s not found", chip,lin);
+            plugin_logger_warn(&g_logger, "Line %s:%s not found", chip, lin);
             continue;
         }
 
@@ -139,8 +139,7 @@ static int init_io_from_csv(const char *filename)
         if (!gchip)
         {
             plugin_logger_error(&g_logger, "Cannot open chip %s", chip);
-            fclose(fp);
-            return -1;
+            goto error;
         }
 
         struct gpiod_line_settings *settings = gpiod_line_settings_new();
@@ -169,8 +168,7 @@ static int init_io_from_csv(const char *filename)
             gpiod_request_config_free(rcfg);
             gpiod_line_settings_free(settings);
             gpiod_chip_close(gchip);
-            fclose(fp);
-            return -1;
+            goto error;
         }
 
         if (is_input)
@@ -187,6 +185,10 @@ static int init_io_from_csv(const char *filename)
     fclose(fp);
     io_initialized = 1;
     return 0;
+
+error:
+    fclose(fp);
+    return -1;
 }
 
 /* ----------------- Plugin hooks ----------------- */
@@ -239,6 +241,8 @@ void stop_loop(void)
 
 void cycle_start(void)
 {
+    enum gpiod_line_value val;
+
     if (!plugin_initialized || !plugin_running || !io_initialized)
         return;
 
@@ -249,9 +253,9 @@ void cycle_start(void)
         {
             if (inputs[b][bit])
             {
-                int val = gpiod_line_request_get_value(inputs[b][bit], 0);
-                if (val >= 0)
-                    *g_args.bool_input[b][bit] = val ? 1 : 0;
+                val = gpiod_line_request_get_value(inputs[b][bit], 0);
+                if (val != GPIOD_LINE_VALUE_ERROR)
+                    *g_args.bool_input[b][bit] = val ? true : false;
             }
         }
     }
@@ -259,6 +263,8 @@ void cycle_start(void)
 
 void cycle_end(void)
 {
+    enum gpiod_line_value val;
+
     if (!plugin_initialized || !plugin_running || !io_initialized)
         return;
 
@@ -269,7 +275,8 @@ void cycle_end(void)
         {
             if (outputs[b][bit])
             {
-                int val = *g_args.bool_output[b][bit] ? 1 : 0;
+                val = *g_args.bool_output[b][bit] ? GPIOD_LINE_VALUE_ACTIVE
+                                                  : GPIOD_LINE_VALUE_INACTIVE;
                 gpiod_line_request_set_value(outputs[b][bit], 0, val);
             }
         }
