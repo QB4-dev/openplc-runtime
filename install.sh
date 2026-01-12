@@ -143,45 +143,41 @@ echo "Working directory: $(pwd)"
 
 install_dependencies()
 {
-    # Check for MSYS2 first (before trying to source /etc/os-release)
+    # Check for MSYS2 first (before trying to detect package manager)
     if is_msys2; then
         echo "Platform: MSYS2/Windows"
         install_deps_msys2
         return $?
     fi
 
-    source /etc/os-release
-    echo "Distro: $ID"
-
-    case "$ID" in
-        ubuntu|debian)
-            install_deps_apt "$1"
-            ;;
-        centos)
-            if [[ "$VERSION_ID" == 7* ]]; then
-                install_deps_yum "$1"
-            else
-                install_deps_dnf "$1"
-            fi
-            ;;
-        rhel)
-            if [[ "$VERSION_ID" == 7* ]]; then
-                install_deps_yum "$1"
-            else
-                install_deps_dnf "$1"
-            fi
-            ;;
-        fedora)
-            install_deps_dnf "$1"
-            ;;
-        *)
-            echo "Unsupported Linux distro: $ID" >&2
-            return 1
-            ;;
-    esac
+    # Detect package manager instead of distro for broader compatibility
+    # This automatically supports all distros using these package managers
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "Package manager: apt (Debian/Ubuntu/Mint/Pop!_OS/etc.)"
+        install_deps_apt
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "Package manager: dnf (Fedora/RHEL 8+/Rocky/AlmaLinux/etc.)"
+        install_deps_dnf
+    elif command -v yum >/dev/null 2>&1; then
+        echo "Package manager: yum (RHEL 7/CentOS 7)"
+        install_deps_yum
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "Package manager: pacman (Arch/Manjaro/EndeavourOS/etc.)"
+        install_deps_pacman
+    elif command -v zypper >/dev/null 2>&1; then
+        echo "Package manager: zypper (openSUSE/SUSE)"
+        install_deps_zypper
+    elif command -v apk >/dev/null 2>&1; then
+        echo "Package manager: apk (Alpine Linux)"
+        install_deps_apk
+    else
+        echo "ERROR: No supported package manager found" >&2
+        echo "Supported package managers: apt, dnf, yum, pacman, zypper, apk" >&2
+        return 1
+    fi
 }
 
-# For Ubuntu/Debian
+# For apt-based distros (Debian, Ubuntu, Linux Mint, Pop!_OS, elementary OS, Zorin, MX Linux, etc.)
 install_deps_apt() {
     apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -194,25 +190,60 @@ install_deps_apt() {
     && rm -rf /var/lib/apt/lists/*
 }
 
-# For CentOS 7/RHEL 7 (older)
+# For yum-based distros (RHEL 7, CentOS 7, Amazon Linux)
 install_deps_yum() {
     yum install -y \
         gcc gcc-c++ make cmake \
-        python3 python3-devel python3-pip python3-venv \
-        && yum clean all
+        python3 python3-devel python3-pip \
+    && yum clean all
 }
 
-# For Fedora/RHEL 8+/CentOS Stream
+# For dnf-based distros (Fedora, RHEL 8+, CentOS Stream, Rocky Linux, AlmaLinux, Oracle Linux 8+)
 install_deps_dnf() {
     dnf install -y \
         gcc gcc-c++ make cmake \
-        python3 python3-devel python3-pip python3-venv \
-        && dnf clean all
+        python3 python3-devel python3-pip \
+    && dnf clean all
+}
+
+# For pacman-based distros (Arch Linux, Manjaro, EndeavourOS, Garuda, ArcoLinux, etc.)
+install_deps_pacman() {
+    pacman -Sy --noconfirm
+    pacman -S --noconfirm --needed \
+        base-devel \
+        gcc \
+        make \
+        cmake \
+        pkgconf \
+        python \
+        python-pip \
+        python-setuptools
+}
+
+# For zypper-based distros (openSUSE, SUSE Linux Enterprise)
+install_deps_zypper() {
+    zypper refresh && \
+    zypper install -y \
+        gcc gcc-c++ make cmake \
+        python3 python3-devel python3-pip \
+        pkg-config
+}
+
+# For apk-based distros (Alpine Linux)
+install_deps_apk() {
+    apk update && \
+    apk add --no-cache \
+        build-base \
+        gcc \
+        make \
+        cmake \
+        pkgconf \
+        python3 python3-dev py3-pip
 }
 
 # For MSYS2 on Windows
 install_deps_msys2() {
-    echo "Installing dependencies via pacman..."
+    echo "Installing dependencies via pacman (MSYS2)..."
     # Update package database (but don't do full system upgrade to avoid breaking frozen bundles)
     pacman -Sy --noconfirm
     # Install required packages
