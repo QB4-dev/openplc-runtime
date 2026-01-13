@@ -3,6 +3,7 @@
 
 #include "../drivers/plugin_driver.h"
 #include "image_tables.h"
+#include "journal_buffer.h"
 #include "plc_state_manager.h"
 #include "scan_cycle_manager.h"
 #include "utils/log.h"
@@ -36,6 +37,31 @@ void *plc_cycle_thread(void *arg)
     image_tables_fill_null_pointers();
     plugin_mutex_give(&plugin_driver->buffer_mutex);
 
+    // Initialize journal buffer for race-condition-free plugin writes
+    journal_buffer_ptrs_t journal_ptrs = {
+        .bool_input = bool_input,
+        .bool_output = bool_output,
+        .bool_memory = bool_memory,
+        .byte_input = byte_input,
+        .byte_output = byte_output,
+        .int_input = int_input,
+        .int_output = int_output,
+        .int_memory = int_memory,
+        .dint_input = dint_input,
+        .dint_output = dint_output,
+        .dint_memory = dint_memory,
+        .lint_input = lint_input,
+        .lint_output = lint_output,
+        .lint_memory = lint_memory,
+        .buffer_size = BUFFER_SIZE,
+        .image_mutex = &plugin_driver->buffer_mutex
+    };
+    if (journal_init(&journal_ptrs) != 0) {
+        log_error("Failed to initialize journal buffer");
+    } else {
+        log_info("Journal buffer initialized");
+    }
+
     log_info("Starting main loop");
 
     pthread_mutex_lock(&state_mutex);
@@ -52,6 +78,10 @@ void *plc_cycle_thread(void *arg)
     {
         scan_cycle_time_start();
         plugin_mutex_take(&plugin_driver->buffer_mutex);
+
+        // Apply pending journal entries before plugin hooks run
+        // This ensures all plugin writes from the previous cycle are visible
+        journal_apply_and_clear();
 
         // Call cycle_start for all active native plugins that registered the hook
         plugin_driver_cycle_start(plugin_driver);
@@ -159,6 +189,10 @@ int unload_plc_program(PluginManager *pm)
 
         // Wait for the PLC thread to finish
         pthread_join(plc_thread, NULL);
+
+        // Cleanup journal buffer before clearing image tables
+        journal_cleanup();
+        log_info("Journal buffer cleaned up");
 
         // Clear temporary pointers from image tables before unloading
         // This ensures clean state for the next program load
