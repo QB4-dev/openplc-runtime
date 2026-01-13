@@ -119,7 +119,11 @@ class OpenPLCCoilsDataBlock(ModbusSparseDataBlock):
         return values
 
     def setValues(self, address, values):
-        """Set coil values to OpenPLC bool_output using SafeBufferAccess"""
+        """Set coil values to OpenPLC bool_output using SafeBufferAccess.
+
+        Note: Writes go through the journal buffer system which is internally
+        thread-safe, so no mutex is needed for write operations.
+        """
         address = address - 1  # Modbus addresses are 0-based
 
         if not self.safe_buffer_access.is_valid:
@@ -129,9 +133,7 @@ class OpenPLCCoilsDataBlock(ModbusSparseDataBlock):
                 )
             return
 
-        # Ensure thread-safe access
-        self.safe_buffer_access.acquire_mutex()
-
+        # Journal writes are thread-safe, no mutex needed
         for i, value in enumerate(values):
             coil_addr = address + i
 
@@ -141,14 +143,11 @@ class OpenPLCCoilsDataBlock(ModbusSparseDataBlock):
                 bit_idx = coil_addr % MAX_BITS  # bit within buffer
 
                 _, error_msg = self.safe_buffer_access.write_bool_output(
-                    buffer_idx, bit_idx, bool(value), thread_safe=False
+                    buffer_idx, bit_idx, bool(value)
                 )
                 if error_msg != "Success":
                     if logger:
                         logger.error(f"Error setting coil {coil_addr}: {error_msg}")
-
-        # Release mutex after access
-        self.safe_buffer_access.release_mutex()
 
 
 class OpenPLCDiscreteInputsDataBlock(ModbusSparseDataBlock):
@@ -330,7 +329,11 @@ class OpenPLCHoldingRegistersDataBlock(ModbusSparseDataBlock):
         return values
 
     def setValues(self, address, values):
-        """Set holding register values to OpenPLC int_output using SafeBufferAccess"""
+        """Set holding register values to OpenPLC int_output using SafeBufferAccess.
+
+        Note: Writes go through the journal buffer system which is internally
+        thread-safe, so no mutex is needed for write operations.
+        """
         address = address - 1  # Modbus addresses are 0-based
 
         if not self.safe_buffer_access.is_valid:
@@ -340,22 +343,15 @@ class OpenPLCHoldingRegistersDataBlock(ModbusSparseDataBlock):
                 )
             return
 
-        # Ensure buffer mutex
-        self.safe_buffer_access.acquire_mutex()
-
+        # Journal writes are thread-safe, no mutex needed
         for i, value in enumerate(values):
             reg_addr = address + i
 
             if reg_addr < self.num_registers:
-                _, error_msg = self.safe_buffer_access.write_int_output(
-                    reg_addr, value, thread_safe=False
-                )
+                _, error_msg = self.safe_buffer_access.write_int_output(reg_addr, value)
                 if error_msg != "Success":
                     if logger:
                         logger.error(f"Error setting holding register {reg_addr}: {error_msg}")
-
-        # Release mutex after access
-        self.safe_buffer_access.release_mutex()
 
 
 class OpenPLCSegmentedCoilsDataBlock(ModbusSparseDataBlock):
@@ -459,7 +455,11 @@ class OpenPLCSegmentedCoilsDataBlock(ModbusSparseDataBlock):
             self.safe_buffer_access.release_mutex()
 
     def setValues(self, address, values):
-        """Set coil values to appropriate OpenPLC buffer based on address segmentation"""
+        """Set coil values to appropriate OpenPLC buffer based on address segmentation.
+
+        Note: Writes go through the journal buffer system which is internally
+        thread-safe, so no mutex is needed for write operations.
+        """
         address = address - 1  # Modbus addresses are 1-based
 
         if not self.safe_buffer_access.is_valid:
@@ -469,29 +469,26 @@ class OpenPLCSegmentedCoilsDataBlock(ModbusSparseDataBlock):
                 )
             return
 
-        self.safe_buffer_access.acquire_mutex()
-        try:
-            for i, value in enumerate(values):
-                coil_addr = address + i
-                segment, buffer_idx, bit_idx = self._get_segment_info(coil_addr)
+        # Journal writes are thread-safe, no mutex needed
+        for i, value in enumerate(values):
+            coil_addr = address + i
+            segment, buffer_idx, bit_idx = self._get_segment_info(coil_addr)
 
-                if segment == "qx":
-                    _, error_msg = self.safe_buffer_access.write_bool_output(
-                        buffer_idx, bit_idx, bool(value), thread_safe=False
-                    )
-                    if error_msg != "Success":
-                        if logger:
-                            logger.error(f"Error setting coil %QX{coil_addr}: {error_msg}")
-                elif segment == "mx":
-                    mx_addr = coil_addr - self.qx_bits
-                    _, error_msg = self.safe_buffer_access.write_bool_memory(
-                        buffer_idx, bit_idx, bool(value), thread_safe=False
-                    )
-                    if error_msg != "Success":
-                        if logger:
-                            logger.error(f"Error setting coil %MX{mx_addr}: {error_msg}")
-        finally:
-            self.safe_buffer_access.release_mutex()
+            if segment == "qx":
+                _, error_msg = self.safe_buffer_access.write_bool_output(
+                    buffer_idx, bit_idx, bool(value)
+                )
+                if error_msg != "Success":
+                    if logger:
+                        logger.error(f"Error setting coil %QX{coil_addr}: {error_msg}")
+            elif segment == "mx":
+                mx_addr = coil_addr - self.qx_bits
+                _, error_msg = self.safe_buffer_access.write_bool_memory(
+                    buffer_idx, bit_idx, bool(value)
+                )
+                if error_msg != "Success":
+                    if logger:
+                        logger.error(f"Error setting coil %MX{mx_addr}: {error_msg}")
 
 
 class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
@@ -704,7 +701,13 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
             self.safe_buffer_access.release_mutex()
 
     def setValues(self, address, values):
-        """Set holding register values to appropriate OpenPLC buffer based on address segmentation"""
+        """Set holding register values to appropriate OpenPLC buffer based on address segmentation.
+
+        Note: While journal writes are thread-safe, this method still uses mutex because
+        partial DINT/LINT updates require read-modify-write (RMW) operations. The mutex
+        ensures consistency between the read and subsequent write for multi-word values.
+        Simple QW/MW writes don't strictly need the mutex, but we keep it for RMW safety.
+        """
         address = address - 1  # Modbus addresses are 1-based
 
         if not self.safe_buffer_access.is_valid:
@@ -714,18 +717,20 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
                 )
             return
 
+        # Mutex needed for read-modify-write consistency on partial DINT/LINT updates
         self.safe_buffer_access.acquire_mutex()
         try:
             # For multi-word values, we need to handle partial writes carefully
             # Build a map of pending multi-word updates
-            pending_dint = {}  # value_idx -> {word_offset: value}
-            pending_lint = {}  # value_idx -> {word_offset: value}
+            pending_dint = {}  # value_idx -> [words]
+            pending_lint = {}  # value_idx -> [words]
 
             for i, value in enumerate(values):
                 reg_addr = address + i
                 segment, value_idx, word_offset = self._get_segment_info(reg_addr)
 
                 if segment == "qw":
+                    # Simple 16-bit write - journal handles thread safety
                     _, error_msg = self.safe_buffer_access.write_int_output(
                         value_idx, value & 0xFFFF, thread_safe=False
                     )
@@ -734,6 +739,7 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
                             logger.error(f"Error setting %QW{value_idx}: {error_msg}")
 
                 elif segment == "mw":
+                    # Simple 16-bit write - journal handles thread safety
                     _, error_msg = self.safe_buffer_access.write_int_memory(
                         value_idx, value & 0xFFFF, thread_safe=False
                     )
@@ -742,7 +748,7 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
                             logger.error(f"Error setting %MW{value_idx}: {error_msg}")
 
                 elif segment == "md":
-                    # Collect words for this DINT
+                    # Partial 32-bit write - need RMW for consistency
                     if value_idx not in pending_dint:
                         # Read current value to preserve unchanged words
                         current, _ = self.safe_buffer_access.read_dint_memory(
@@ -754,7 +760,7 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
                     pending_dint[value_idx][word_offset] = value & 0xFFFF
 
                 elif segment == "ml":
-                    # Collect words for this LINT
+                    # Partial 64-bit write - need RMW for consistency
                     if value_idx not in pending_lint:
                         # Read current value to preserve unchanged words
                         current, _ = self.safe_buffer_access.read_lint_memory(
@@ -765,7 +771,7 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
                         )
                     pending_lint[value_idx][word_offset] = value & 0xFFFF
 
-            # Write pending DINT values
+            # Write pending DINT values (RMW complete, write to journal)
             for value_idx, words in pending_dint.items():
                 dint_value = self._combine_words_to_dint(words)
                 _, error_msg = self.safe_buffer_access.write_dint_memory(
@@ -775,7 +781,7 @@ class OpenPLCSegmentedHoldingRegistersDataBlock(ModbusSparseDataBlock):
                     if logger:
                         logger.error(f"Error setting %MD{value_idx}: {error_msg}")
 
-            # Write pending LINT values
+            # Write pending LINT values (RMW complete, write to journal)
             for value_idx, words in pending_lint.items():
                 lint_value = self._combine_words_to_lint(words)
                 _, error_msg = self.safe_buffer_access.write_lint_memory(
