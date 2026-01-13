@@ -33,7 +33,28 @@ class GenericBufferAccessor(IBufferAccessor):
     This class encapsulates the complex ctypes buffer access logic and provides
     a clean, type-agnostic interface for buffer operations. It eliminates the
     massive code duplication that existed in the original SafeBufferAccess class.
+
+    Write operations use the journal buffer system for race-condition-free writes.
+    Read operations access buffers directly (reads are always safe).
     """
+
+    # Journal buffer type mapping (matches journal_buffer_type_t enum)
+    JOURNAL_TYPE_MAP = {
+        "bool_input": 0,   # JOURNAL_BOOL_INPUT
+        "bool_output": 1,  # JOURNAL_BOOL_OUTPUT
+        "bool_memory": 2,  # JOURNAL_BOOL_MEMORY
+        "byte_input": 3,   # JOURNAL_BYTE_INPUT
+        "byte_output": 4,  # JOURNAL_BYTE_OUTPUT
+        "int_input": 5,    # JOURNAL_INT_INPUT
+        "int_output": 6,   # JOURNAL_INT_OUTPUT
+        "int_memory": 7,   # JOURNAL_INT_MEMORY
+        "dint_input": 8,   # JOURNAL_DINT_INPUT
+        "dint_output": 9,  # JOURNAL_DINT_OUTPUT
+        "dint_memory": 10, # JOURNAL_DINT_MEMORY
+        "lint_input": 11,  # JOURNAL_LINT_INPUT
+        "lint_output": 12, # JOURNAL_LINT_OUTPUT
+        "lint_memory": 13, # JOURNAL_LINT_MEMORY
+    }
 
     def __init__(self, runtime_args, validator: BufferValidator, mutex_manager: MutexManager):
         """
@@ -97,12 +118,16 @@ class GenericBufferAccessor(IBufferAccessor):
         """
         Generic buffer write operation.
 
+        Writes go through the journal buffer system for race-condition-free operation.
+        The journal is internally thread-safe, so the thread_safe parameter is kept
+        for backward compatibility but writes no longer require explicit mutex.
+
         Args:
             buffer_type: Buffer type name (e.g., 'bool_output', 'int_output')
             buffer_idx: Buffer index
             value: Value to write
             bit_idx: Bit index (required for boolean operations)
-            thread_safe: Whether to use mutex protection
+            thread_safe: Kept for backward compatibility (journal is always thread-safe)
 
         Returns:
             Tuple[bool, str]: (success, error_message)
@@ -117,18 +142,11 @@ class GenericBufferAccessor(IBufferAccessor):
         # Get buffer type info
         buffer_type_obj, direction = self.buffer_types.get_buffer_info(buffer_type)
 
-        # Define the write operation
-        def do_write():
-            return self._perform_write(
-                buffer_type, buffer_type_obj, direction, buffer_idx, value, bit_idx
-            )
-
-        # Execute with or without mutex
-        if thread_safe:
-            result = self.mutex.with_mutex(do_write)
-            return result if isinstance(result, tuple) else (result, "Success")
-        else:
-            return do_write()
+        # Journal writes are thread-safe internally, no mutex needed
+        # The thread_safe parameter is ignored but kept for backward compatibility
+        return self._perform_write(
+            buffer_type, buffer_type_obj, direction, buffer_idx, value, bit_idx
+        )
 
     def get_buffer_pointer(self, buffer_type: str) -> Optional[ctypes.POINTER]:
         """
@@ -215,26 +233,60 @@ class GenericBufferAccessor(IBufferAccessor):
     ) -> Tuple[bool, str]:
         """
         Internal method to perform the actual buffer write operation.
+
+        Uses the journal buffer system for race-condition-free writes.
+        All writes go through the journal and are applied atomically at the
+        start of the next PLC scan cycle.
         """
         try:
-            # Get the appropriate buffer pointer
-            buffer_ptr = self.get_buffer_pointer(buffer_type)
-            if buffer_ptr is None or buffer_ptr.contents is None:
-                return False, f"Buffer pointer not available for {buffer_type}"
+            # Get journal buffer type
+            journal_type = self.JOURNAL_TYPE_MAP.get(buffer_type)
+            if journal_type is None:
+                return False, f"Unknown buffer type: {buffer_type}"
 
             # Handle boolean operations (require bit indexing)
             if buffer_type_obj.name == "bool":
                 if bit_idx is None:
                     return False, "Bit index required for boolean operations"
 
-                # Set the specific bit within the buffer
-                buffer_ptr[buffer_idx][bit_idx].contents.value = 1 if value else 0
+                # Write through journal
+                result = self.args.journal_write_bool(
+                    journal_type, buffer_idx, bit_idx, 1 if value else 0
+                )
+                if result != 0:
+                    return False, f"Journal write failed with code {result}"
                 return True, "Success"
 
-            # Handle other buffer types (direct value assignment)
-            else:
-                buffer_ptr[buffer_idx].contents.value = value
+            # Handle byte operations
+            elif buffer_type_obj.name == "byte":
+                result = self.args.journal_write_byte(journal_type, buffer_idx, int(value) & 0xFF)
+                if result != 0:
+                    return False, f"Journal write failed with code {result}"
                 return True, "Success"
+
+            # Handle int operations (16-bit)
+            elif buffer_type_obj.name == "int":
+                result = self.args.journal_write_int(journal_type, buffer_idx, int(value) & 0xFFFF)
+                if result != 0:
+                    return False, f"Journal write failed with code {result}"
+                return True, "Success"
+
+            # Handle dint operations (32-bit)
+            elif buffer_type_obj.name == "dint":
+                result = self.args.journal_write_dint(journal_type, buffer_idx, int(value) & 0xFFFFFFFF)
+                if result != 0:
+                    return False, f"Journal write failed with code {result}"
+                return True, "Success"
+
+            # Handle lint operations (64-bit)
+            elif buffer_type_obj.name == "lint":
+                result = self.args.journal_write_lint(journal_type, buffer_idx, int(value))
+                if result != 0:
+                    return False, f"Journal write failed with code {result}"
+                return True, "Success"
+
+            else:
+                return False, f"Unsupported buffer type: {buffer_type_obj.name}"
 
         except (AttributeError, TypeError, ValueError, OSError, MemoryError) as e:
             return False, f"Buffer write error: {e}"

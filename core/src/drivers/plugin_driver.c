@@ -14,6 +14,7 @@
 #endif
 
 #include "../plc_app/image_tables.h"
+#include "../plc_app/journal_buffer.h"
 #include "../plc_app/utils/log.h"
 #include "plugin_config.h"
 #include "plugin_driver.h"
@@ -103,6 +104,36 @@ int plugin_mutex_take(pthread_mutex_t *mutex)
 int plugin_mutex_give(pthread_mutex_t *mutex)
 {
     return pthread_mutex_unlock(mutex);
+}
+
+// Journal write wrapper functions for plugins
+// These match the function pointer signatures in plugin_types.h and delegate
+// to the journal_buffer.h API with proper type casting.
+
+static int plugin_journal_write_bool(int type, int index, int bit, int value)
+{
+    return journal_write_bool((journal_buffer_type_t)type, (uint16_t)index, (uint8_t)bit,
+                              value != 0);
+}
+
+static int plugin_journal_write_byte(int type, int index, int value)
+{
+    return journal_write_byte((journal_buffer_type_t)type, (uint16_t)index, (uint8_t)value);
+}
+
+static int plugin_journal_write_int(int type, int index, int value)
+{
+    return journal_write_int((journal_buffer_type_t)type, (uint16_t)index, (uint16_t)value);
+}
+
+static int plugin_journal_write_dint(int type, int index, unsigned int value)
+{
+    return journal_write_dint((journal_buffer_type_t)type, (uint16_t)index, (uint32_t)value);
+}
+
+static int plugin_journal_write_lint(int type, int index, unsigned long long value)
+{
+    return journal_write_lint((journal_buffer_type_t)type, (uint16_t)index, (uint64_t)value);
 }
 
 // Python capsule destructor for runtime args
@@ -669,6 +700,13 @@ void *generate_structured_args_with_driver(plugin_type_t type, plugin_driver_t *
     args->log_debug = log_debug;
     args->log_warn  = log_warn;
     args->log_error = log_error;
+
+    // Initialize journal write functions for race-condition-free buffer writes
+    args->journal_write_bool = plugin_journal_write_bool;
+    args->journal_write_byte = plugin_journal_write_byte;
+    args->journal_write_int  = plugin_journal_write_int;
+    args->journal_write_dint = plugin_journal_write_dint;
+    args->journal_write_lint = plugin_journal_write_lint;
 
     // printf("[PLUGIN]: Runtime args initialized:\n");
     // printf("[PLUGIN]:   buffer_size = %d\n", args->buffer_size);
