@@ -70,7 +70,7 @@ longword Msg_GetSockAddr(socket_t FSocket)
     #ifdef OS_WINDOWS
     int namelen = sizeof(RemoteSin);
     #else
-    uint32_t namelen = sizeof(RemoteSin);
+    socklen_t namelen = sizeof(RemoteSin);
     #endif
     namelen=sizeof(sockaddr_in);
     if (getpeername(FSocket,(struct sockaddr*)&RemoteSin, &namelen)==0)
@@ -131,7 +131,7 @@ void TMsgSocket::GetLocal()
     #ifdef OS_WINDOWS
 		int namelen = sizeof(LocalSin);
     #else
-        uint32_t namelen = sizeof(LocalSin);
+        socklen_t namelen = sizeof(LocalSin);
     #endif
     if (getsockname(FSocket, (struct sockaddr*)&LocalSin, &namelen)==0)
         GetSin(LocalSin, LocalAddress, LocalPort);
@@ -142,7 +142,7 @@ void TMsgSocket::GetRemote()
     #ifdef OS_WINDOWS
         int namelen = sizeof(RemoteSin);
     #else
-        uint32_t namelen = sizeof(RemoteSin);
+        socklen_t namelen = sizeof(RemoteSin);
     #endif
 	if (getpeername(FSocket,(struct sockaddr*)&RemoteSin, &namelen)==0)
 		GetSin(RemoteSin, RemoteAddress, RemotePort);
