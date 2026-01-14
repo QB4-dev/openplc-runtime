@@ -194,10 +194,15 @@ int unload_plc_program(PluginManager *pm)
         journal_cleanup();
         log_info("Journal buffer cleaned up");
 
+        // Stop plugins FIRST (before acquiring mutex) to prevent deadlock
+        // The S7Comm plugin's RWArea callback acquires buffer_mutex during
+        // client read operations. If we try to acquire the mutex before
+        // stopping the plugin, we can deadlock if a client is connected.
+        plugin_driver_stop(plugin_driver);
+
         // Clear temporary pointers from image tables before unloading
         // This ensures clean state for the next program load
         plugin_mutex_take(&plugin_driver->buffer_mutex);
-        plugin_driver_stop(plugin_driver);
         image_tables_clear_null_pointers();
         plugin_mutex_give(&plugin_driver->buffer_mutex);
 
