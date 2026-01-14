@@ -282,7 +282,7 @@ int plugin_driver_init(plugin_driver_t *driver)
     }
 
     // Only acquire Python GIL if we have Python plugins and Python is initialized
-    PyGILState_STATE local_gstate = 0;
+    PyGILState_STATE local_gstate;
     int have_gil = has_python_plugin && Py_IsInitialized();
     if (have_gil)
     {
@@ -624,7 +624,7 @@ void plugin_driver_destroy(plugin_driver_t *driver)
 
     // Check if Python is initialized before any Python operations
     int python_initialized = has_python_plugin && Py_IsInitialized();
-    PyGILState_STATE local_gstate = 0;
+    PyGILState_STATE local_gstate;
 
     if (python_initialized)
     {
@@ -664,7 +664,10 @@ void plugin_driver_destroy(plugin_driver_t *driver)
     if (python_initialized)
     {
         PyGILState_Release(local_gstate);
-        PyEval_RestoreThread(main_tstate);
+        if (main_tstate != NULL)
+        {
+            PyEval_RestoreThread(main_tstate);
+        }
         Py_FinalizeEx();
     }
 
