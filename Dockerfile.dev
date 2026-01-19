@@ -14,6 +14,9 @@ RUN rm -rf build/ venvs/ 2>/dev/null || true
 RUN chmod +x install.sh scripts/* start_openplc.sh
 RUN ./install.sh
 
+# Clean up apt cache to reduce image size (Docker-specific optimization)
+RUN rm -rf /var/lib/apt/lists/*
+
 EXPOSE 8443
 
 CMD ["bash", "./scripts/run-pytest.sh"]

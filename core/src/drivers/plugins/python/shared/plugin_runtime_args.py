@@ -50,6 +50,13 @@ class PluginRuntimeArgs(ctypes.Structure):
         ("log_debug", ctypes.CFUNCTYPE(None, ctypes.c_char_p)),
         ("log_warn", ctypes.CFUNCTYPE(None, ctypes.c_char_p)),
         ("log_error", ctypes.CFUNCTYPE(None, ctypes.c_char_p)),
+        # Journal write function pointers for race-condition-free buffer writes
+        # int (*func)(int type, int index, int bit/value, int value)
+        ("journal_write_bool", ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)),
+        ("journal_write_byte", ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)),
+        ("journal_write_int", ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)),
+        ("journal_write_dint", ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint)),
+        ("journal_write_lint", ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulonglong)),
     ]
 
     def validate_pointers(self):

@@ -24,3 +24,4 @@ __pycache__/
 # Ignore all object files and shared libraries
 *.o
 *.so
+.DS_Store

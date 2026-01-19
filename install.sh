@@ -143,45 +143,41 @@ echo "Working directory: $(pwd)"
 
 install_dependencies()
 {
-    # Check for MSYS2 first (before trying to source /etc/os-release)
+    # Check for MSYS2 first (before trying to detect package manager)
     if is_msys2; then
         echo "Platform: MSYS2/Windows"
         install_deps_msys2
         return $?
     fi
 
-    source /etc/os-release
-    echo "Distro: $ID"
-
-    case "$ID" in
-        ubuntu|debian)
-            install_deps_apt "$1"
-            ;;
-        centos)
-            if [[ "$VERSION_ID" == 7* ]]; then
-                install_deps_yum "$1"
-            else
-                install_deps_dnf "$1"
-            fi
-            ;;
-        rhel)
-            if [[ "$VERSION_ID" == 7* ]]; then
-                install_deps_yum "$1"
-            else
-                install_deps_dnf "$1"
-            fi
-            ;;
-        fedora)
-            install_deps_dnf "$1"
-            ;;
-        *)
-            echo "Unsupported Linux distro: $ID" >&2
-            return 1
-            ;;
-    esac
+    # Detect package manager instead of distro for broader compatibility
+    # This automatically supports all distros using these package managers
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "Package manager: apt (Debian/Ubuntu/Mint/Pop!_OS/etc.)"
+        install_deps_apt
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "Package manager: dnf (Fedora/RHEL 8+/Rocky/AlmaLinux/etc.)"
+        install_deps_dnf
+    elif command -v yum >/dev/null 2>&1; then
+        echo "Package manager: yum (RHEL 7/CentOS 7)"
+        install_deps_yum
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "Package manager: pacman (Arch/Manjaro/EndeavourOS/etc.)"
+        install_deps_pacman
+    elif command -v zypper >/dev/null 2>&1; then
+        echo "Package manager: zypper (openSUSE/SUSE)"
+        install_deps_zypper
+    elif command -v apk >/dev/null 2>&1; then
+        echo "Package manager: apk (Alpine Linux)"
+        install_deps_apk
+    else
+        echo "ERROR: No supported package manager found" >&2
+        echo "Supported package managers: apt, dnf, yum, pacman, zypper, apk" >&2
+        return 1
+    fi
 }
 
-# For Ubuntu/Debian
+# For apt-based distros (Debian, Ubuntu, Linux Mint, Pop!_OS, elementary OS, Zorin, MX Linux, etc.)
 install_deps_apt() {
     apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -190,29 +186,63 @@ install_deps_apt() {
         gcc \
         make \
         cmake \
-        pkg-config \
-    && rm -rf /var/lib/apt/lists/*
+        pkg-config
 }
 
-# For CentOS 7/RHEL 7 (older)
+# For yum-based distros (RHEL 7, CentOS 7, Amazon Linux)
 install_deps_yum() {
     yum install -y \
         gcc gcc-c++ make cmake \
         python3 python3-devel python3-pip python3-venv \
-        && yum clean all
+    && yum clean all
 }
 
-# For Fedora/RHEL 8+/CentOS Stream
+# For dnf-based distros (Fedora, RHEL 8+, CentOS Stream, Rocky Linux, AlmaLinux, Oracle Linux 8+)
 install_deps_dnf() {
     dnf install -y \
         gcc gcc-c++ make cmake \
         python3 python3-devel python3-pip python3-venv \
-        && dnf clean all
+    && dnf clean all
+}
+
+# For pacman-based distros (Arch Linux, Manjaro, EndeavourOS, Garuda, ArcoLinux, etc.)
+install_deps_pacman() {
+    pacman -Sy --noconfirm
+    pacman -S --noconfirm --needed \
+        base-devel \
+        gcc \
+        make \
+        cmake \
+        pkgconf \
+        python \
+        python-pip \
+        python-setuptools
+}
+
+# For zypper-based distros (openSUSE, SUSE Linux Enterprise)
+install_deps_zypper() {
+    zypper refresh && \
+    zypper install -y \
+        gcc gcc-c++ make cmake \
+        python3 python3-devel python3-pip \
+        pkg-config
+}
+
+# For apk-based distros (Alpine Linux)
+install_deps_apk() {
+    apk update && \
+    apk add --no-cache \
+        build-base \
+        gcc \
+        make \
+        cmake \
+        pkgconf \
+        python3 python3-dev py3-pip
 }
 
 # For MSYS2 on Windows
 install_deps_msys2() {
-    echo "Installing dependencies via pacman..."
+    echo "Installing dependencies via pacman (MSYS2)..."
     # Update package database (but don't do full system upgrade to avoid breaking frozen bundles)
     pacman -Sy --noconfirm
     # Install required packages
@@ -349,6 +379,107 @@ setup_plugin_venvs() {
     return 0
 }
 
+# Function to build native plugins that have CMakeLists.txt
+build_native_plugins() {
+    local native_plugins_dir="$OPENPLC_DIR/core/src/drivers/plugins/native"
+    local plugins_output_dir="$OPENPLC_DIR/build/plugins"
+
+    log_info "Scanning for native plugins to build..."
+
+    # Check if native plugins directory exists
+    if [ ! -d "$native_plugins_dir" ]; then
+        log_warning "Native plugins directory not found: $native_plugins_dir"
+        return 0
+    fi
+
+    # Create plugins output directory
+    mkdir -p "$plugins_output_dir"
+
+    # Find directories with CMakeLists.txt (indicates buildable plugin)
+    local plugins_found=0
+    local plugins_built=0
+    local plugins_failed=0
+
+    for plugin_dir in "$native_plugins_dir"/*/; do
+        # Skip if not a directory
+        [ -d "$plugin_dir" ] || continue
+
+        local plugin_name=$(basename "$plugin_dir")
+        local cmake_file="$plugin_dir/CMakeLists.txt"
+
+        # Skip if no CMakeLists.txt
+        if [ ! -f "$cmake_file" ]; then
+            continue
+        fi
+
+        plugins_found=$((plugins_found + 1))
+        log_info "Found native plugin: $plugin_name"
+
+        # Create build directory for this plugin
+        local plugin_build_dir="$plugin_dir/build"
+
+        # Clean existing build directory
+        if [ -d "$plugin_build_dir" ]; then
+            log_info "Cleaning existing build directory for $plugin_name..."
+            rm -rf "$plugin_build_dir"
+        fi
+
+        mkdir -p "$plugin_build_dir"
+
+        # Build the plugin
+        log_info "Building $plugin_name..."
+        (
+            cd "$plugin_build_dir" || exit 1
+
+            # Configure with cmake, passing OpenPLC root directory
+            if ! cmake -DOPENPLC_ROOT="$OPENPLC_DIR" ..; then
+                log_error "CMake configuration failed for $plugin_name"
+                exit 1
+            fi
+
+            # Build with make
+            if ! make -j"$(nproc)"; then
+                log_error "Compilation failed for $plugin_name"
+                exit 1
+            fi
+        )
+
+        if [ $? -eq 0 ]; then
+            # Copy built plugin to central plugins directory
+            local built_lib=$(find "$plugin_build_dir" -name "*.so" -type f 2>/dev/null | head -1)
+            if [ -n "$built_lib" ] && [ -f "$built_lib" ]; then
+                cp "$built_lib" "$plugins_output_dir/"
+                log_success "Built and installed: $plugin_name ($(basename "$built_lib"))"
+                plugins_built=$((plugins_built + 1))
+            else
+                log_warning "No .so file found after building $plugin_name"
+                plugins_failed=$((plugins_failed + 1))
+            fi
+        else
+            log_error "Failed to build $plugin_name"
+            plugins_failed=$((plugins_failed + 1))
+        fi
+    done
+
+    if [ $plugins_found -eq 0 ]; then
+        log_info "No native plugins with CMakeLists.txt found"
+        return 0
+    fi
+
+    log_info "Native plugin build summary: $plugins_built/$plugins_found succeeded"
+
+    if [ $plugins_failed -gt 0 ]; then
+        log_warning "$plugins_failed plugin(s) failed to build"
+        # Don't fail installation if some plugins fail - they may be optional
+    fi
+
+    if [ $plugins_built -gt 0 ]; then
+        log_success "Native plugins built and installed to: $plugins_output_dir"
+    fi
+
+    return 0
+}
+
 # Setup runtime directory (needed for both Linux and Docker)
 # On MSYS2, use /run/runtime which maps to the MSYS2 installation directory
 if is_msys2; then
@@ -387,6 +518,10 @@ setup_plugin_venvs
 echo "Compiling OpenPLC..."
 if compile_plc; then
     echo "Build process completed successfully!"
+
+    # Build native plugins after main compilation
+    echo "Building native plugins..."
+    build_native_plugins
 
     # Create installation marker (must be done before starting the service)
     touch "$OPENPLC_DIR/.installed"

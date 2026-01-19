@@ -3,6 +3,12 @@ Batch Processor for OpenPLC Python Plugin System
 
 This module handles batch operations for optimized buffer access.
 It processes multiple read/write operations with a single mutex acquisition.
+
+Note on thread safety:
+- Read operations require mutex to ensure consistent reads from image tables
+- Write operations go through the journal buffer system which is internally
+  thread-safe. The mutex is still acquired for batch writes to maintain API
+  consistency and to support mixed read/write operations atomically.
 """
 
 from typing import List, Tuple, Dict, Any

@@ -17,6 +17,9 @@ RUN rm -rf build/ venvs/ .venv/ 2>/dev/null || true
 # Run installation script
 RUN ./install.sh
 
+# Clean up apt cache to reduce image size (Docker-specific optimization)
+RUN rm -rf /var/lib/apt/lists/*
+
 # Expose webserver port
 EXPOSE 8443
 
